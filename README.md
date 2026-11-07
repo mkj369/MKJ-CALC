@@ -1,7 +1,7 @@
 # MKJ CALC
 
 A full scientific calculator that runs in the browser — three calculator *models*,
-twelve *modes*, and a real math engine written from scratch (no libraries).
+sixteen *modes*, and a real math engine written from scratch (no libraries).
 Everything is branded **MKJ CALC**; no third-party brand names appear in the UI.
 
 ## Flow
@@ -19,13 +19,24 @@ Everything is branded **MKJ CALC**; no third-party brand names appear in the UI.
 |---|---|---|
 | **991 ES Plus** | classic pad | CALC / SOLVE / ∫dx row, ∫ Σ M+ STO, rectangular keys |
 | **991 EX Plus** | ClassWiz pad | S⇔D, x⁻¹, 4 function rows + number block, MENU key |
-| **991 CW** | flat pad | circular function keys, HOME / SETTINGS / FORMAT / CATALOG / TOOLS / VARIABLE |
+| **991 CW** | flat pad | circular function keys, icon **HOME** screen, SETTINGS / FORMAT / CATALOG / TOOLS / VARIABLE, tall right-edge scroll rocker |
 
-Every model renders a real device frame: brushed-plastic body with screws, solar cell
-strip, 4-gradation LCD, round ON/MENU keys and a genuine navigation pad
-(▲ ◀ ▶ ▼ around a centre key).
+Every model renders a real device frame: plastic body, red solar cell strip,
+green-grey LCD, small round control keys and a genuine navigation pad
+(▲ ◀ ▶ ▼ around a centre OK key). The 991 CW follows the real key map
+key-for-key: 3 control rows (ON · HOME · ▲ / SETTINGS · MENU · ◀ OK ▶ /
+SHIFT · VARIABLE · FUNCTION · ▼ · CATALOG · TOOLS), six function columns
+(1/x x² √ x^ x³ log and Ans sin cos tan ( )), a five-column number pad
+ending in DEL AC / × ÷ / + − / 0 . ×10ˣ FORMAT EXE, and a gold SHIFT key.
+Boot lands on the CW **icon home screen** (4 × 4: Calculate, Statistics,
+Distribution, Spreadsheet, Table, Equation, Inequality, Complex, Base-N,
+Matrix, Vector, Ratio, Solve, Verify, Math Box, Constants) where the arrow
+keys move the boxed selection and EXE/OK opens it. `HOME` returns to it.
 
-Each model carries its own `keys[]` table in `js/layouts.js`, including per-key
+Key sizes are measured at runtime (`fitKeys()`) so the whole device always
+fits without scrolling, from 360 × 640 phones up to tablets.
+
+Each model carries its own key table in `js/layouts.js`, including per-key
 SHIFT (`s` / `sv`) and ALPHA (`a` / `av`) bindings.
 
 ## Modes

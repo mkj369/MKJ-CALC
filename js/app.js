@@ -11,7 +11,7 @@
 
   /* ---------------- state ---------------- */
   var S = {
-    model: 'esplus',
+    model: 'cw',
     mode: 'calc',
     angle: 'deg',
     format: 'norm',
@@ -25,6 +25,7 @@
     vars: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, M: 0 },
     shift: false,
     alpha: false,
+    hsel: 0,
     storeArmed: false,
     result: '0',
     resultSub: '',
@@ -60,7 +61,7 @@
         if (typeof d.vars[k] === 'number') S.vars[k] = d.vars[k];
       });
       if (Array.isArray(d.history)) S.history = d.history;
-      if (!LAY[S.model]) S.model = 'esplus';
+      if (!LAY[S.model]) S.model = 'cw';
     } catch (e) {}
   }
 
@@ -116,9 +117,20 @@
     };
   }
 
+  /* the LCD shows maths, not raw engine syntax */
+  function pretty(src) {
+    return String(src)
+      .replace(/\*/g, '×').replace(/\//g, '÷')
+      .replace(/×10\^\(/g, '×10^(')
+      .replace(/([0-9)])-/g, '$1−')
+      .replace(/^-/, '−')
+      .replace(/sqrt\(/g, '√(').replace(/cbrt\(/g, '∛(')
+      .replace(/\^\^/g, '^');
+  }
+
   function paintExpr() {
-    var b = S.expr.slice(0, S.caret);
-    var a = S.expr.slice(S.caret);
+    var b = pretty(S.expr.slice(0, S.caret));
+    var a = pretty(S.expr.slice(S.caret));
     $('exprBefore').textContent = b;
     var c = $('caretChar');
     var ch = a.charAt(0);
@@ -131,10 +143,11 @@
   function paint() {
     var lay = LAY[S.model];
     $('topPlate').textContent = lay.plate;
+    $('topMode').textContent = S.home ? 'Home' : (MODES[S.mode] || MODES.calc).name;
+    $('plateBrand').textContent = lay.brand || 'MKJ CALC';
     $('plateModel').textContent = lay.model;
-    $('plateSeries').textContent = lay.series;
-    $('plateSub').textContent = lay.sub;
-    $('topMode').textContent = (MODES[S.mode] || MODES.calc).name;
+    $('footModel').textContent = lay.model;
+    setHome(S.home);
     $('lcdMode').textContent = ({
       calc: 'COMP', complex: 'CMPLX', stat: 'STAT', dist: 'DIST', matrix: 'MATRIX',
       vector: 'VECTOR', equation: 'EQN', inequality: 'INEQ', basen: 'BASE',
@@ -168,13 +181,18 @@
 
   function keyEl(key) {
     var b = el('button', 'key ' + (key.c || ''));
+    b.dataset.v = key.v;
+    b.dataset.act = key.act || 'ins';
+    b.setAttribute('aria-label', key.cap || key.l || key.v);
     if (key.shape) b.classList.add(key.shape);
     if (key.s) b.classList.add('has-shift');
     if (key.span > 1) b.classList.add('wide');
 
     if (key.s) b.appendChild(el('span', 'sh', key.s));
     if (key.a) b.appendChild(el('span', 'al', key.a));
-    b.appendChild(el('span', 'lab ' + (key.sm || ''), key.l));
+    if (key.ic) b.appendChild(svgIcon(key.ic));
+    if (key.l) b.appendChild(el('span', 'lab ' + (key.sm || ''), key.l));
+    if (key.cap) b.appendChild(el('span', 'cap', key.cap));
 
     b.addEventListener('click', function (ev) {
       ev.preventDefault();
@@ -198,27 +216,234 @@
     return n;
   }
 
+  /* inline svg glyphs for the CW control keys */
+  var ICONS = {
+    power: 'M12 3v8M7.5 5.6a7 7 0 1 0 9 0',
+    home: 'M4 11.5 12 4l8 7.5M6.5 10.5V20h11v-9.5',
+    gear: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4ZM19 12l1.6-1.2-1.4-2.6-1.9.7-1.4-.8-.3-2h-3l-.3 2-1.4.8-1.9-.7-1.4 2.6L7 12l-1.6 1.2 1.4 2.6 1.9-.7 1.4.8.3 2h3l.3-2 1.4-.8 1.9.7 1.4-2.6Z',
+    left: 'M14.5 6.5 9 12l5.5 5.5',
+    right: 'M9.5 6.5 15 12l-5.5 5.5',
+    var: 'M3.5 8.5h3l4 7h4M8 8.5h3M14.5 15.5h6M17.5 12.5v6',
+    func: 'M8 4.5v15M8 12h6.5M14.5 4.5v6',
+    book: 'M12 6.5c-2-1.6-4.5-1.7-6.5-1.6v12c2-.1 4.5 0 6.5 1.6 2-1.6 4.5-1.7 6.5-1.6v-12c-2-.1-4.5 0-6.5 1.6ZM12 6.5v12',
+    tools: 'M9.8 13.2a3.4 3.4 0 0 0 4.6-4.6L17 6l1 1-2.6 2.6a3.4 3.4 0 0 1-4.6 4.6L5 20l-1-1 5.8-5.8Z',
+    up: 'M12 18.5V6M6.5 11.5 12 6l5.5 5.5',
+    down: 'M12 5.5V18M6.5 12.5 12 18l5.5-5.5',
+    menu: 'M6.5 8.5h11M6.5 12h11M6.5 15.5h11'
+  };
+
+  function svgIcon(name) {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'kic');
+    svg.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', ICONS[name] || '');
+    svg.appendChild(p);
+    return svg;
+  }
+
+
+  /* keep the whole device on one screen: size keys from the free height */
+  function fitKeys() {
+    var pad = $('pad'), dev = $('device'), lcd = $('lcd');
+    if (!pad || !dev || !lcd) return;
+    var lay = LAY[S.model];
+    var wide = pad.clientWidth || dev.clientWidth - 22;
+    if (!wide) return;
+
+    /* screen keeps a device-like share of the body, pad gets the rest */
+    var devH = dev.clientHeight || 620;
+    var lcdH = Math.round(Math.min(Math.max(devH * 0.165, 84), 140));
+    lcd.style.height = lcdH + 'px';
+
+    var used = 0;
+    Array.prototype.forEach.call(dev.children, function (c) {
+      if (c === pad || c === lcd) return;
+      var cs = getComputedStyle(c);
+      used += c.getBoundingClientRect().height +
+              parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+    });
+    var dcs = getComputedStyle(dev);
+    used += parseFloat(dcs.paddingTop) + parseFloat(dcs.paddingBottom);
+
+    /* the pad is a flex child: whatever the screen did not take is ours */
+    pad.style.height = 'auto';
+    var avail = pad.clientHeight || Math.max(140, devH - used - lcdH - 10);
+    var isCW = lay.shape === 'cw';
+    var groups = isCW ? 3 : (lay.controls || []).length;
+    var groupsW = isCW ? groups * 0.82 : groups;      /* CW control rows are short */
+    var keyRows = lay.rows.length;
+    var gapX = Math.max(2, Math.round(wide / lay.cols * 0.08));
+    var free = avail - 12 - (keyRows - 1) * 8;
+    var byH = Math.floor(free / (keyRows + groups * 0.82));
+    var byW = Math.floor(wide / lay.cols) - gapX;
+    var kw = Math.max(16, Math.min(byH, byW));
+
+    pad.style.setProperty('--kw', kw + 'px');
+    pad.style.setProperty('--kgx', gapX + 'px');
+
+    /* converge on the biggest key size that still fits the device */
+    function measure() {
+      var h = 0;
+      Array.prototype.forEach.call(pad.children, function (c) {
+        var cs = getComputedStyle(c);
+        h += c.getBoundingClientRect().height +
+             parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+      });
+      return h;
+    }
+    for (var pass = 0; pass < 10; pass++) {
+      var slack = pad.clientHeight - measure();
+      var step = slack > 0
+        ? Math.max(1, Math.floor(slack / (keyRows + groupsW)))
+        : Math.min(-1, Math.ceil(slack / (keyRows + groupsW)));
+      if ((slack > 0 && step <= 0) || (slack < 0 && step >= 0)) break;
+      var next = Math.min(byW, kw + step);
+      if (next === kw) break;
+      kw = Math.max(14, next);
+      pad.style.setProperty('--kw', kw + 'px');
+      if (kw <= 14) break;
+    }
+    /* guarantee no overflow on very short screens */
+    for (var guard = 0; guard < 24 && pad.scrollHeight > pad.clientHeight + 1; guard++) {
+      kw = Math.max(14, kw - 1);
+      pad.style.setProperty('--kw', kw + 'px');
+      if (kw === 14) break;
+    }
+  }
+
+  var wsDock = null;               /* the single workspace keypad host */
+  var fitTimer = 0;
+  function fitSoon() {
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(fitKeys, 60);
+  }
+  window.addEventListener('resize', fitSoon);
+  window.addEventListener('orientationchange', fitSoon);
+
   function buildPad() {
     var lay = LAY[S.model];
     var pad = $('pad');
     pad.innerHTML = '';
+    pad.dataset.shape = lay.shape;
 
-    var cluster = el('div', 'cluster');
-    var l = el('div', 'cl-l');
-    l.appendChild(keyEl(lay.top[0]));
-    l.appendChild(keyEl(lay.top[1]));
-    cluster.appendChild(l);
-    cluster.appendChild(navPad());
-    var r = el('div', 'cl-r');
-    r.appendChild(keyEl(lay.top[3]));
-    r.appendChild(keyEl(lay.top[4]));
-    cluster.appendChild(r);
-    pad.appendChild(cluster);
+    if (lay.shape === 'cw' && lay.controls) {
+      /* three fixed control rows + the tall scroll rocker on the right */
+      var block = el('div', 'ctlblock');
+      block.style.gridTemplateColumns = 'repeat(' + lay.cols + ', 1fr)';
+      lay.controls.forEach(function (k) {
+        var b = keyEl(k);
+        b.style.gridRow = k.gr;
+        b.style.gridColumn = k.gc;
+        block.appendChild(b);
+      });
+      if (lay.rocker) {
+        var rk = el('div', 'rocker');
+        [['up', 'scrollup'], ['down', 'scrolldown']].forEach(function (pair) {
+          rk.appendChild(keyEl({ l: '', v: pair[1], act: 'cmd', c: 'ctl rock', ic: pair[0] }));
+        });
+        block.appendChild(rk);
+      }
+      pad.appendChild(block);
+    } else {
+      (lay.controls || []).forEach(function (row) {
+        var wrap = el('div', 'ctlrow');
+        wrap.style.gridTemplateColumns = 'repeat(' + lay.cols + ', 1fr)';
+        row.keys.forEach(function (k) {
+          if (!k) wrap.appendChild(el('span', 'ctlspace'));
+          else wrap.appendChild(keyEl(k));
+        });
+        pad.appendChild(wrap);
+      });
+    }
 
     lay.rows.forEach(function (row) {
-      row.forEach(function (k) { pad.appendChild(keyEl(k)); });
+      var wrap = el('div', 'krow');
+      wrap.style.gridTemplateColumns = 'repeat(' + lay.cols + ', 1fr)';
+      row.forEach(function (k) { wrap.appendChild(keyEl(k)); });
+      for (var i = row.length; i < lay.cols; i++) wrap.appendChild(el('span', 'gapkey'));
+      pad.appendChild(wrap);
     });
+
     document.body.dataset.model = S.model;
+    document.body.dataset.shape = lay.shape;
+    $('classwizLine').hidden = !lay.home;
+    setHome(!!lay.home && S.home);
+    fitKeys();
+  }
+
+  /* ---- CW style icon home screen inside the LCD ---- */
+  var HOME_ICONS = [
+    { m: 'calc', t: 'Calculate', g: '1+1' },
+    { m: 'stat', t: 'Statistics', g: 'σ' },
+    { m: 'dist', t: 'Distribution', g: 'Φ' },
+    { m: 'spreadsheet', t: 'Spreadsheet', g: '▦' },
+    { m: 'table', t: 'Table', g: '▤' },
+    { m: 'equation', t: 'Equation', g: 'x=y' },
+    { m: 'inequality', t: 'Inequality', g: 'x>y' },
+    { m: 'complex', t: 'Complex', g: 'i' },
+    { m: 'basen', t: 'Base-N', g: '1010' },
+    { m: 'matrix', t: 'Matrix', g: '[ ]' },
+    { m: 'vector', t: 'Vector', g: '→' },
+    { m: 'ratio', t: 'Ratio', g: 'a:b' },
+    { m: 'solve', t: 'Solve', g: 'ƒ' },
+    { m: 'verify', t: 'Verify', g: '✓' },
+    { m: 'mathbox', t: 'Math Box', g: '⚄' },
+    { m: 'constants', t: 'Constants', g: 'π' }
+  ];
+
+  function homeMove(d) {
+    var n = HOME_ICONS.length;
+    S.hsel = ((S.hsel + d) % n + n) % n;
+    markHomeSel();
+    var el0 = $('homeScreen').children[S.hsel];
+    if (el0 && el0.scrollIntoView) {
+      try { el0.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    }
+  }
+
+  function markHomeSel() {
+    Array.prototype.forEach.call($('homeScreen').children, function (c, i) {
+      c.classList.toggle('sel', i === S.hsel);
+    });
+  }
+
+  function homeOpen() {
+    var ic = HOME_ICONS[S.hsel] || HOME_ICONS[0];
+    S.home = false;
+    $('homeScreen').hidden = true;
+    $('screenMain').hidden = false;
+    openMode(ic.m);
+  }
+
+  function renderHome() {
+    var host = $('homeScreen');
+    if (!host) return;
+    host.innerHTML = '';
+    HOME_ICONS.forEach(function (ic) {
+      var b = el('button', 'hicon');
+      b.appendChild(el('span', 'hg', ic.g));
+      b.appendChild(el('span', 'ht', ic.t));
+      b.dataset.mode = ic.m;
+      b.addEventListener('click', function () {
+        S.hsel = HOME_ICONS.indexOf(ic);
+        markHomeSel();
+        homeOpen();
+      });
+      host.appendChild(b);
+    });
+    markHomeSel();
+  }
+
+  function setHome(on) {
+    S.home = !!on;
+    var hs = $('homeScreen');
+    if (!hs) return;
+    if (!S.model || !LAY[S.model].home) on = false;
+    hs.hidden = !on;
+    $('screenMain').hidden = !!on;
   }
 
   /* ---------------- input ---------------- */
@@ -396,14 +621,29 @@
       case 'ac': case 'on': clearAll(); break;
       case 'off': clearAll(); toast('MKJ CALC'); break;
       case 'del': del(); break;
-      case 'equals': equals(); break;
+      case 'equals': if (S.home) homeOpen(); else equals(); break;
       case 'sd': toggleSD(); break;
       case 'ans': insert('Ans'); break;
-      case 'left': S.caret = Math.max(0, S.caret - 1); paint(); break;
-      case 'right': S.caret = Math.min(S.expr.length, S.caret + 1); paint(); break;
-      case 'up': browse(-1); break;
-      case 'down': browse(1); break;
-      case 'mode': case 'home': showModes(); break;
+      case 'left':
+        if (S.home) homeMove(-1);
+        else { S.caret = Math.max(0, S.caret - 1); paint(); }
+        break;
+      case 'right':
+        if (S.home) homeMove(1);
+        else { S.caret = Math.min(S.expr.length, S.caret + 1); paint(); }
+        break;
+      case 'up': if (S.home) homeMove(-4); else browse(-1); break;
+      case 'down': if (S.home) homeMove(4); else browse(1); break;
+      case 'scrollup': if (S.home) homeMove(-1); else browse(-1); break;
+      case 'scrolldown': if (S.home) homeMove(1); else browse(1); break;
+      case 'mode': showModes(); break;
+      case 'home':
+        S.home = true;
+        $('workspace').hidden = true;
+        S.mode = 'calc';
+        paint();
+        break;
+      case 'ok': if (S.home) homeOpen(); else showModes(); break;
       case 'settings': case 'tools': openMenu(); break;
       case 'catalog': openCatalog(); break;
       case 'variable': openVars('insert'); break;
@@ -475,6 +715,9 @@
         S.model = id;
         document.body.dataset.model = id;
         buildPad();
+        S.home = !!LAY[id].home;
+        S.mode = 'calc';
+        $('workspace').hidden = true;
         paint();
         save();
         closeSheet();
@@ -628,6 +871,8 @@
     var m = MODES[id];
     if (!m) return;
     S.mode = id;
+    S.home = false;
+    setHome(false);
 
     /* Calculate / Complex use the main LCD + keypad, no workspace */
     if (id === 'calc' || id === 'complex') {
@@ -645,8 +890,8 @@
     back.addEventListener('click', function () {
       ws.hidden = true;
       S.mode = 'calc';
+      if (LAY[S.model].home) S.home = true;
       paint();
-      showModes();
     });
     head.appendChild(back);
     head.appendChild(el('b', null, m.name));
@@ -657,65 +902,87 @@
 
     var body = el('div', 'ws-body');
     ws.appendChild(body);
+    var dock = el('div', 'ws-dock');
+    ws.appendChild(dock);
+    wsDock = dock;
 
     if (m.render) {
-      wsApi = makeApi(body);
+      wsApi = makeApi(body, dock);
       try { m.render(body, wsApi); }
       catch (e) { body.innerHTML = '<div class="out err">' + e.message + '</div>'; }
     }
 
-    /* on-screen number pad for form-based modes */
-    var padHost = el('div', 'minipad');
-    padHost.dataset.pad = '1';
-    ws.querySelectorAll('input').forEach(function (inp, i) { if (i === 0) inp.dataset.first = '1'; });
-    var focused = null;
-    function bindInputs() {
-      var list = [].slice.call(ws.querySelectorAll('input'));
-      if (!focused || !list.length) focused = list[0] || null;
-      list.forEach(function (inp) {
-        inp.addEventListener('focus', function () { focused = inp; });
-        inp.addEventListener('input', function () { focused = inp; });
-        inp.addEventListener('click', function () { focused = inp; });
-      });
-    }
-    bindInputs();
-    ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '−'].forEach(function (k) {
-      var b = el('button', null, k);
-      b.addEventListener('click', function () {
-        if (!focused) { bindInputs(); if (!focused) return; }
-        var val = k === '−' ? '-' : k;
-        focused.value += val;
-        focused.dispatchEvent(new Event('input', { bubbles: true }));
-      });
-      padHost.appendChild(b);
-    });
-    var delBtn = el('button', 'act', 'DEL');
-    delBtn.addEventListener('click', function () {
-      if (!focused) return;
-      focused.value = focused.value.slice(0, -1);
-      focused.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    var acBtn = el('button', 'act', 'AC');
-    acBtn.addEventListener('click', function () {
-      if (!focused) return;
-      focused.value = '';
-      focused.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    padHost.appendChild(delBtn);
-    padHost.appendChild(acBtn);
-    body.appendChild(padHost);
+    /* the workspace keypad is mounted by the mode itself through setDock();
+       if a mode has inputs but mounted none, fall back to a shared pad */
+    if (!dock.children.length && ws.querySelector('input')) mountFallbackPad(dock, ws);
+    if (!dock.children.length) keyBtn.classList.add('off');
 
     keyBtn.addEventListener('click', function () {
-      padHost.hidden = !padHost.hidden;
+      if (keyBtn.classList.contains('off')) return;
+      dock.hidden = !dock.hidden;
+      keyBtn.classList.toggle('on', !dock.hidden);
     });
 
     ws.hidden = false;
     paint();
   }
 
-  function makeApi(body) {
+  /* shared fallback keypad for modes that only expose plain inputs */
+  function mountFallbackPad(dock, ws) {
+    var focused = null;
+    function bind() {
+      var list = [].slice.call(ws.querySelectorAll('input'));
+      list.forEach(function (inp) {
+        if (inp.dataset.padBound) return;
+        inp.dataset.padBound = '1';
+        inp.addEventListener('focus', function () { focused = inp; });
+        inp.addEventListener('click', function () { focused = inp; });
+        inp.addEventListener('input', function () { focused = inp; });
+      });
+      if (!focused || !list.length) focused = list[0] || null;
+    }
+    bind();
+    var wrap = el('div', 'minipad');
+    ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '(-)'].forEach(function (k) {
+      var b = el('button', 'mp-key', k);
+      b.type = 'button';
+      b.addEventListener('click', function () {
+        if (!focused) { bind(); if (!focused) return; }
+        focused.value += (k === '(-)' ? '-' : k);
+        focused.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      wrap.appendChild(b);
+    });
+    var row = el('div', 'minipad-actions');
+    [['DEL', 'mp-del', function () {
+      if (!focused) return;
+      focused.value = focused.value.slice(0, -1);
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+    }], ['AC', 'mp-ac', function () {
+      if (!focused) return;
+      focused.value = '';
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+    }]].forEach(function (d) {
+      var b = el('button', 'mp-key ' + d[1], d[0]);
+      b.type = 'button';
+      b.addEventListener('click', d[2]);
+      row.appendChild(b);
+    });
+    wrap.appendChild(row);
+    dock.appendChild(wrap);
+  }
+
+  function makeApi(body, dock) {
+    if (dock) wsDock = dock;
     return {
       state: S,
+      dock: dock || null,
+      setDock: function (fn) {
+        if (!wsDock) return;
+        wsDock.innerHTML = '';
+        if (fn) fn(wsDock);
+        else wsDock.style.display = 'none';
+      },
       engine: E,
       el: el,
       toast: toast,
@@ -842,7 +1109,9 @@
     document.body.dataset.model = S.model;
     document.body.dataset.theme = S.theme;
     buildPad();
+    renderHome();
     wire();
+    S.home = !!LAY[S.model].home;
     paint();
   }
 

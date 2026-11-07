@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0b0d10">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>MKJ CALC</title>
-<link rel="stylesheet" href="css/style.css?v=4">
+<link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
 
@@ -25,33 +25,38 @@
 
   <!-- device -->
   <div class="device" id="device">
-    <div class="plate">
-      <div class="plate-l">
-        <span class="logo">MKJ</span>
-        <span class="model" id="plateModel">MKJ-991ES</span>
+    <div class="device-top">
+      <div class="plate">
+        <span class="logo" id="plateBrand">MKJ CALC</span>
+        <span class="model" id="plateModel">991CW</span>
       </div>
-      <div class="plate-r">
-        <span class="series" id="plateSeries">MKJ SERIES</span>
-        <span class="sub" id="plateSub">NATURAL DISPLAY</span>
-      </div>
+      <div class="solar" id="solar" aria-hidden="true"></div>
     </div>
-
-    <div class="solar" id="solar"><i></i><i></i><i></i><i></i><i></i><i></i></div>
 
     <div class="lcd" id="lcd">
-      <div class="lcd-stat">
-        <div class="flags">
-          <span data-f="S">S</span><span data-f="A">A</span><span data-f="M">M</span>
-          <span data-f="STO">STO</span><span data-f="i">i</span>
+      <div id="homeScreen" class="home-grid" hidden></div>
+
+      <div id="screenMain">
+        <div class="lcd-stat">
+          <div class="flags">
+            <span data-f="S">S</span><span data-f="A">A</span><span data-f="M">M</span>
+            <span data-f="STO">STO</span><span data-f="i">i</span>
+          </div>
+          <div class="lcd-right"><span id="lcdMode">COMP</span><span id="lcdAngle">D</span></div>
         </div>
-        <div class="lcd-right"><span id="lcdMode">COMP</span><span id="lcdAngle">D</span></div>
+        <div class="lcd-expr"><span id="exprBefore"></span><span id="caretChar" class="cur"></span><span id="exprAfter"></span></div>
+        <div class="lcd-res" id="result">0</div>
+        <div class="lcd-sub" id="resultSub"></div>
       </div>
-      <div class="lcd-expr"><span id="exprBefore"></span><span id="caretChar" class="cur"></span><span id="exprAfter"></span></div>
-      <div class="lcd-res" id="result">0</div>
-      <div class="lcd-sub" id="resultSub"></div>
     </div>
 
+    <div class="classwiz" id="classwizLine">CLASSWIZ</div>
+
     <div class="pad" id="pad"></div>
+
+    <div class="device-foot">
+      <span>MKJ</span><span id="footModel">991CW</span>
+    </div>
   </div>
 
   <div class="workspace" id="workspace" hidden></div>
@@ -157,9 +162,9 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/engine.js?v=4"></script>
-<script src="js/layouts.js?v=4"></script>
-<script src="js/modes.js?v=4"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/engine.js?v=5"></script>
+<script src="js/layouts.js?v=5"></script>
+<script src="js/modes.js?v=5"></script>
+<script src="js/app.js?v=5"></script>
 </body>
 </html>

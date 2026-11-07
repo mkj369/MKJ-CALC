@@ -1,22 +1,5 @@
 /* ============================================================
-   MKJ CALC — keypad layouts v3 (real-device look)
-
-   A layout is
-     {
-       id, name, plate, sub, foot, series,
-       colors: { body, key, keyAlt, ... } (CSS handles most)
-       top: [ key, key, {nav:true}, key, key ]      ← upper cluster
-       rows: [ [key ×5], ... ]                      ← main grid
-     }
-
-   key = {
-     l  : main label        v  : insert text (act 'ins')
-     act: 'ins' | 'cmd'     c  : extra css class (num/op/enter/ac/del...)
-     s / sv : SHIFT label + shift insert or command
-     a / av : ALPHA label + alpha insert
-     shape  : 'circle' | 'pill' | 'round'   (device styling)
-     sm     : 'sm' | 'xs' label size       span : grid columns
-   }
+   MKJ CALC — keypads v5 (device faithful)
    ============================================================ */
 (function (global) {
   'use strict';
@@ -26,250 +9,259 @@
     return {
       l: l, v: v, act: o.act || 'ins',
       s: o.s || null, sv: o.sv || null,
-      a: o.a || null, av: o.av || null,
-      c: o.c || '', sm: o.sm || '', span: o.span || 1, shape: o.shape || ''
+      c: o.c || '', sm: o.sm || '', round: !!o.round, wide: !!o.wide,
+      ic: o.ic || null,        /* inline svg icon id */
+      cap: o.cap || null,      /* caption printed under a control key */
+      gr: o.gr || 0, gc: o.gc || 0, grs: o.grs || 1,
+      sub: o.sub || null       /* tiny label under the glyph */
     };
   }
   function CMD(l, cmd, o) { o = o || {}; o.act = 'cmd'; return K(l, cmd, o); }
-  var NAV = { nav: true };
 
-  /* ------------------------------------------------------------
-     shared blocks
-     ------------------------------------------------------------ */
-  function numberBlock() {
+  /* ---------------- dense numeric block (5 cols) ---------------- */
+  function numRows(variant) {
     return [
       [
-        K('7', '7', { c: 'num' }), K('8', '8', { c: 'num' }), K('9', '9', { c: 'num' }),
-        CMD('DEL', 'del', { c: 'del' }),
-        CMD('AC', 'ac', { c: 'ac', s: 'OFF', sv: 'off' })
+        K('7', '7', { c: 'n', s: 'x̂' }), K('8', '8', { c: 'n' }), K('9', '9', { c: 'n' }),
+        CMD('DEL', 'del', { c: 'd' }), CMD('AC', 'ac', { c: 'a' })
       ],
       [
-        K('4', '4', { c: 'num' }), K('5', '5', { c: 'num' }), K('6', '6', { c: 'num' }),
-        K('×', '*', { c: 'op' }), K('÷', '/', { c: 'op' })
+        K('4', '4', { c: 'n' }), K('5', '5', { c: 'n' }), K('6', '6', { c: 'n' }),
+        K('×', '*', { c: 'o' }), K('÷', '/', { c: 'o' })
       ],
       [
-        K('1', '1', { c: 'num' }), K('2', '2', { c: 'num' }), K('3', '3', { c: 'num' }),
-        K('+', '+', { c: 'op' }), K('−', '-', { c: 'op' })
+        K('1', '1', { c: 'n' }), K('2', '2', { c: 'n' }), K('3', '3', { c: 'n' }),
+        K('+', '+', { c: 'o' }), K('−', '-', { c: 'o' })
       ],
-      [
-        K('0', '0', { c: 'num' }), K('.', '.', { c: 'num', s: 'Ran#', sv: 'rand' }),
-        K('(', '(', { c: 'op', s: '%', sv: '%' }),
-        K(')', ')', { c: 'op', s: ',', sv: ',' }),
-        CMD('=', 'equals', { c: 'enter', s: '≈', sv: 'sd' })
-      ]
+      variant === 'cw'
+        ? [
+            K('0', '0', { c: 'n' }), K('.', '.', { c: 'n' }), K('×10ˣ', '×10^(', { c: 'f', sm: 'sm' }),
+            CMD('FORMAT', 'sd', { c: 'd', sm: 'xs' }),
+            CMD('EXE', 'equals', { c: 'e', sm: 'sm' })
+          ]
+        : [
+            K('0', '0', { c: 'n' }), K('.', '.', { c: 'n' }),
+            K('(', '(', { c: 'f', s: '%', sv: '%' }), K(')', ')', { c: 'f', s: ',', sv: ',' }),
+            CMD('=', 'equals', { c: 'e' })
+          ]
     ];
   }
 
-  /* π e % M+ STO row */
-  function memoryRow() {
-    return [
-      K('π', 'π', { c: 'fn', s: 'e', sv: 'e' }),
-      K('e', 'e', { c: 'fn', s: 'i', sv: 'i' }),
-      K('%', '%', { c: 'fn', s: 'Abs', sv: 'Abs(' }),
-      CMD('M+', 'mplus', { c: 'fn', s: 'M−', sv: 'mminus', a: 'M', av: 'M' }),
-      CMD('STO', 'sto', { c: 'fn', s: 'RCL', sv: 'rcl' })
-    ];
-  }
-
-  /* ×10ˣ ENG DRG Ran# Ans row */
-  function utilityRow() {
-    return [
-      K('×10ˣ', '×10^(', { c: 'fn', sm: 'xs' }),
-      CMD('ENG', 'eng', { c: 'fn', sm: 'xs' }),
-      CMD('DRG', 'drg', { c: 'fn', sm: 'xs', s: 'SETUP', sv: 'settings' }),
-      CMD('Ran#', 'rand', { c: 'fn', sm: 'xs' }),
-      CMD('Ans', 'ans', { c: 'fn' })
-    ];
-  }
-
-  /* ------------------------------------------------------------
-     991 ES Plus — classic pad
-     ------------------------------------------------------------ */
-  var ES = {
-    id: 'esplus',
-    name: '991 ES Plus',
-    plate: 'MKJ-991ES PLUS',
-    model: 'MKJ-991ES',
-    series: 'MKJ SERIES',
-    sub: 'NATURAL DISPLAY · 417 FUNCTIONS',
-    foot: 'MKJ CALC · 991 ES Plus',
-    cols: 5,
-    shape: 'classic',
-    top: [
-      CMD('SHIFT', 'shift', { c: 'shiftkey', s: 'OFF', sv: 'off', shape: 'pill' }),
-      CMD('ALPHA', 'alpha', { c: 'alphakey', shape: 'pill' }),
-      NAV,
-      CMD('MODE', 'mode', { c: 'menu', s: 'SETUP', sv: 'settings', shape: 'round', sm: 'xs' }),
-      CMD('ON', 'on', { c: 'onkey', shape: 'round', sm: 'xs' })
-    ],
-    rows: [
-      [
-        CMD('CALC', 'calc', { c: 'fn', sm: 'xs' }),
-        CMD('SOLVE', 'solve', { c: 'fn', sm: 'xs' }),
-        K('∫dx', '∫(', { c: 'fn', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
-        K('x²', '²', { c: 'fn', s: 'x³', sv: '³' }),
-        K('x^', '^', { c: 'fn', s: 'ˣ√', sv: '^(1/' })
-      ],
-      [
-        K('√', '√(', { c: 'fn', s: '∛', sv: '∛(' }),
-        K('log', 'log(', { c: 'fn', s: '10ˣ', sv: '×10^(' }),
-        K('ln', 'ln(', { c: 'fn', s: 'eˣ', sv: 'exp(' }),
-        K('(-)', '-', { c: 'fn', s: '∠', sv: '∠', a: 'A', av: 'A' }),
-        K('°′″', '°', { c: 'fn', sm: 'sm', s: 'ENG', sv: 'eng', a: 'B', av: 'B' })
-      ],
-      [
-        K('hyp', 'sinh(', { c: 'fn', s: 'sinh⁻¹', sv: 'sinh⁻¹(', a: 'C', av: 'C' }),
-        K('sin', 'sin(', { c: 'fn', s: 'sin⁻¹', sv: 'sin⁻¹(', a: 'D', av: 'D' }),
-        K('cos', 'cos(', { c: 'fn', s: 'cos⁻¹', sv: 'cos⁻¹(', a: 'E', av: 'E' }),
-        K('tan', 'tan(', { c: 'fn', s: 'tan⁻¹', sv: 'tan⁻¹(', a: 'F', av: 'F' }),
-        K('Abs', 'Abs(', { c: 'fn', s: 'Conjg', sv: 'Conjg(' })
-      ],
-      [
-        K('x!', '!', { c: 'fn', s: 'nPr', sv: 'nPr(' }),
-        K('nCr', 'nCr(', { c: 'fn', sm: 'sm', s: 'Π', sv: 'Π(' }),
-        K('Σ', '∑(', { c: 'fn', s: 'Pol', sv: 'Pol(' }),
-        K('x⁻¹', '^(-1)', { c: 'fn', sm: 'sm' }),
-        CMD('S⇔D', 'sd', { c: 'fn', sm: 'sm' })
-      ],
-      memoryRow()
-    ].concat(numberBlock(), [utilityRow()]),
-    modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
-            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
-            'verify', 'mathbox', 'constants']
-  };
-
-  /* ------------------------------------------------------------
-     991 EX Plus — ClassWiz pad
-     ------------------------------------------------------------ */
-  var EX = {
-    id: 'explus',
-    name: '991 EX Plus',
-    plate: 'MKJ-991EX PLUS',
-    model: 'MKJ-991EX',
-    series: 'MKJ CLASS',
-    sub: 'NATURAL DISPLAY · 552 FUNCTIONS',
-    foot: 'MKJ CALC · 991 EX Plus',
-    cols: 5,
-    shape: 'classwiz',
-    top: [
-      CMD('SHIFT', 'shift', { c: 'shiftkey', s: 'OFF', sv: 'off', shape: 'pill' }),
-      CMD('ALPHA', 'alpha', { c: 'alphakey', shape: 'pill' }),
-      NAV,
-      CMD('MENU', 'mode', { c: 'menu', s: 'SETUP', sv: 'settings', shape: 'round', sm: 'xs' }),
-      CMD('ON', 'on', { c: 'onkey', shape: 'round', sm: 'xs' })
-    ],
-    rows: [
-      [
-        CMD('CALC', 'calc', { c: 'fn', sm: 'xs' }),
-        CMD('SOLVE', 'solve', { c: 'fn', sm: 'xs' }),
-        K('∫dx', '∫(', { c: 'fn', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
-        K('x²', '²', { c: 'fn', s: 'x³', sv: '³' }),
-        K('x^', '^', { c: 'fn', s: 'ˣ√', sv: '^(1/' })
-      ],
-      [
-        K('√', '√(', { c: 'fn', s: '∛', sv: '∛(' }),
-        K('log', 'log(', { c: 'fn', s: '10ˣ', sv: '×10^(' }),
-        K('ln', 'ln(', { c: 'fn', s: 'eˣ', sv: 'exp(' }),
-        K('x⁻¹', '^(-1)', { c: 'fn', sm: 'sm', s: 'x!', sv: '!' }),
-        K('(-)', '-', { c: 'fn', s: '∠', sv: '∠', a: 'A', av: 'A' })
-      ],
-      [
-        K('sin', 'sin(', { c: 'fn', s: 'sin⁻¹', sv: 'sin⁻¹(', a: 'D', av: 'D' }),
-        K('cos', 'cos(', { c: 'fn', s: 'cos⁻¹', sv: 'cos⁻¹(', a: 'E', av: 'E' }),
-        K('tan', 'tan(', { c: 'fn', s: 'tan⁻¹', sv: 'tan⁻¹(', a: 'F', av: 'F' }),
-        K('hyp', 'sinh(', { c: 'fn', s: 'sinh⁻¹', sv: 'sinh⁻¹(', a: 'C', av: 'C' }),
-        K('°′″', '°', { c: 'fn', sm: 'sm', s: 'ENG', sv: 'eng', a: 'B', av: 'B' })
-      ],
-      [
-        K('Abs', 'Abs(', { c: 'fn', s: 'Conjg', sv: 'Conjg(' }),
-        K('nCr', 'nCr(', { c: 'fn', sm: 'sm', s: 'nPr', sv: 'nPr(' }),
-        K('Σ', '∑(', { c: 'fn', s: 'Π', sv: 'Π(' }),
-        K('Pol', 'Pol(', { c: 'fn', sm: 'sm', s: 'Rec', sv: 'Rec(' }),
-        CMD('S⇔D', 'sd', { c: 'fn', sm: 'sm' })
-      ],
-      memoryRow()
-    ].concat(numberBlock(), [utilityRow()]),
-    modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
-            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
-            'verify', 'mathbox', 'constants']
-  };
-
-  /* ------------------------------------------------------------
-     991 CW — flat pad with circular function keys
-     ------------------------------------------------------------ */
+  /* ============================================================
+     991 CW — exact ClassWiz layout
+     ============================================================ */
   var CW = {
     id: 'cw',
     name: '991 CW',
     plate: 'MKJ-991CW',
-    model: 'MKJ-991CW',
-    series: 'MKJ CW',
-    sub: 'HIGH-PERFORMANCE · 4-GRADATION DISPLAY',
-    foot: 'MKJ CALC · 991 CW',
-    cols: 5,
+    model: '991CW',
+    series: 'MKJ',
+    brand: 'MKJ CALC',
+    cols: 6,
     shape: 'cw',
-    top: [
-      CMD('SHIFT', 'shift', { c: 'shiftkey', s: 'OFF', sv: 'off', shape: 'pill' }),
-      CMD('ALPHA', 'alpha', { c: 'alphakey', shape: 'pill' }),
-      NAV,
-      CMD('HOME', 'home', { c: 'menu', shape: 'round', sm: 'xs' }),
-      CMD('ON', 'on', { c: 'onkey', shape: 'round', sm: 'xs' })
+    home: true,           /* icon home screen */
+    /* explicit device positions: ctl(r,c[,span]) — 6 columns / 3 rows */
+    /* the tall scroll rocker lives on the right edge, its own element */
+    rocker: true,
+    controls: [
+      CMD('ON', 'on', { c: 'ctl', ic: 'power', gr: 1, gc: 1, cap: 'ON' }),
+      CMD('HOME', 'home', { c: 'ctl', ic: 'home', gr: 1, gc: 2 }),
+      CMD('', 'up', { c: 'ctl nav', ic: 'up', gr: 1, gc: 4 }),
+      CMD('SETTINGS', 'settings', { c: 'ctl', ic: 'gear', gr: 2, gc: 1, cap: 'SETTINGS' }),
+      CMD('MENU', 'modes', { c: 'ctl', ic: 'menu', gr: 2, gc: 2, cap: ' MENU' }),
+      CMD('', 'left', { c: 'ctl nav', ic: 'left', gr: 2, gc: 3 }),
+      CMD('', 'ok', { c: 'ctl ok', gr: 2, gc: 4 }),
+      CMD('', 'right', { c: 'ctl nav', ic: 'right', gr: 2, gc: 5 }),
+      CMD('SHIFT', 'shift', { c: 'shift', gr: 3, gc: 1, cap: 'SHIFT' }),
+      CMD('VARIABLE', 'variable', { c: 'ctl', ic: 'var', gr: 3, gc: 2, cap: 'VARIABLE' }),
+      CMD('FUNCTION', 'catalog', { c: 'ctl', ic: 'func', gr: 3, gc: 3, cap: 'FUNCTION' }),
+      CMD('', 'down', { c: 'ctl nav', ic: 'down', gr: 3, gc: 4 }),
+      CMD('CATALOG', 'catalog', { c: 'ctl', ic: 'book', gr: 3, gc: 5, cap: 'CATALOG' }),
+      CMD('TOOLS', 'tools', { c: 'ctl', ic: 'tools', gr: 3, gc: 6, cap: 'TOOLS' })
     ],
     rows: [
       [
-        CMD('SETTINGS', 'settings', { c: 'cw', sm: 'xs', shape: 'circle' }),
-        CMD('FORMAT', 'sd', { c: 'cw', sm: 'xs', shape: 'circle' }),
-        CMD('CATALOG', 'catalog', { c: 'cw', sm: 'xs', shape: 'circle' }),
-        CMD('TOOLS', 'tools', { c: 'cw', sm: 'xs', shape: 'circle' }),
-        CMD('VARIABLE', 'variable', { c: 'cw', sm: 'xs', shape: 'circle' })
+        K('1/x', '^(-1)', { s: 'x!', sv: '!', c: 'f' }),
+        K('x²', '²', { s: 'x³', sv: '³', c: 'f' }),
+        K('√', '√(', { s: '∛', sv: '∛(', c: 'f' }),
+        K('x^', '^', { s: 'ˣ√', sv: '^(1/', c: 'f' }),
+        K('x³', '³', { s: 'x⁻¹', sv: '^(-1)', c: 'f', sm: 'sm' }),
+        K('log', 'log(', { s: '10ˣ', sv: '×10^(', c: 'f' })
       ],
       [
-        K('x²', '²', { c: 'cw', shape: 'circle', s: 'x³', sv: '³' }),
-        K('x^', '^', { c: 'cw', shape: 'circle', s: 'ˣ√', sv: '^(1/' }),
-        K('√', '√(', { c: 'cw', shape: 'circle', s: '∛', sv: '∛(' }),
-        K('log', 'log(', { c: 'cw', shape: 'circle', sm: 'sm', s: '10ˣ', sv: '×10^(' }),
-        K('ln', 'ln(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'eˣ', sv: 'exp(' })
-      ],
-      [
-        K('sin', 'sin(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'sin⁻¹', sv: 'sin⁻¹(', a: 'D', av: 'D' }),
-        K('cos', 'cos(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'cos⁻¹', sv: 'cos⁻¹(', a: 'E', av: 'E' }),
-        K('tan', 'tan(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'tan⁻¹', sv: 'tan⁻¹(', a: 'F', av: 'F' }),
-        K('(-)', '-', { c: 'cw', shape: 'circle', sm: 'sm', s: '∠', sv: '∠', a: 'A', av: 'A' }),
-        K('x⁻¹', '^(-1)', { c: 'cw', shape: 'circle', sm: 'xs', s: 'x!', sv: '!', a: 'C', av: 'C' })
-      ],
-      [
-        K('Abs', 'Abs(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'Conjg', sv: 'Conjg(' }),
-        K('nCr', 'nCr(', { c: 'cw', shape: 'circle', sm: 'xs', s: 'nPr', sv: 'nPr(' }),
-        K('∫', '∫(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
-        K('Σ', '∑(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'Π', sv: 'Π(' }),
-        K('°′″', '°', { c: 'cw', shape: 'circle', sm: 'xs', s: 'ENG', sv: 'eng' })
-      ],
-      memoryRow()
-    ].concat(numberBlock(), [utilityRow()]),
+        CMD('Ans', 'ans', { s: 'DRG', sv: 'drg', c: 'f' }),
+        K('sin', 'sin(', { s: 'sin⁻¹', sv: 'sin⁻¹(', c: 'f' }),
+        K('cos', 'cos(', { s: 'cos⁻¹', sv: 'cos⁻¹(', c: 'f' }),
+        K('tan', 'tan(', { s: 'tan⁻¹', sv: 'tan⁻¹(', c: 'f' }),
+        K('(', '(', { s: '%', sv: '%', c: 'f' }),
+        K(')', ')', { s: ',', sv: ',', c: 'f' })
+      ]
+    ].concat(numRows('cw')),
+    extra: [
+      K('ln', 'ln(', { c: 'f' }),
+      K('e', 'e', { c: 'f' }),
+      K('π', 'π', { c: 'f' }),
+      K('x!', '!', { c: 'f' }),
+      K('Abs', 'Abs(', { c: 'f' }),
+      K('nCr', 'nCr(', { c: 'f' })
+    ],
     modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
             'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
             'verify', 'mathbox', 'constants']
   };
 
-  /* ------------------------------------------------------------
-     Catalog
-     ------------------------------------------------------------ */
+  /* ============================================================
+     991 EX PLUS
+     ============================================================ */
+  var EX = {
+    id: 'explus',
+    name: '991 EX Plus',
+    plate: 'MKJ-991EX PLUS',
+    model: '991EX',
+    series: 'MKJ CLASS',
+    brand: 'MKJ CALC',
+    cols: 5,
+    shape: 'classwiz',
+    controls: [
+      { keys: [
+        CMD('SHIFT', 'shift', { c: 'shift', sm: 'xs' }),
+        CMD('ALPHA', 'alpha', { c: 'alpha', sm: 'xs' }),
+        null,
+        CMD('MENU', 'mode', { c: 'ctl', sm: 'xs', round: true }),
+        CMD('ON', 'on', { c: 'ctl', sm: 'xs', round: true })
+      ] },
+      { keys: [
+        CMD('◀', 'left', { c: 'ctl nav', ic: 'left' }),
+        CMD('▲', 'up', { c: 'ctl nav', ic: 'up' }),
+        CMD('OK', 'ok', { c: 'ctl ok' }),
+        CMD('▼', 'down', { c: 'ctl nav', ic: 'down' }),
+        CMD('▶', 'right', { c: 'ctl nav', ic: 'right' })
+      ] }
+    ],
+    rows: [
+      [
+        CMD('CALC', 'calc', { c: 'f', sm: 'xs' }),
+        CMD('SOLVE', 'solve', { c: 'f', sm: 'xs' }),
+        K('∫dx', '∫(', { s: 'd/dx', sv: 'd/dx(', c: 'f', sm: 'xs' }),
+        K('x²', '²', { s: 'x³', sv: '³', c: 'f' }),
+        K('x^', '^', { s: 'ˣ√', sv: '^(1/', c: 'f' })
+      ],
+      [
+        K('√', '√(', { s: '∛', sv: '∛(', c: 'f' }),
+        K('log', 'log(', { s: '10ˣ', sv: '×10^(', c: 'f' }),
+        K('ln', 'ln(', { s: 'eˣ', sv: 'exp(', c: 'f' }),
+        K('x⁻¹', '^(-1)', { s: 'x!', sv: '!', c: 'f', sm: 'sm' }),
+        K('(-)', '-', { s: '∠', sv: '∠', c: 'f' })
+      ],
+      [
+        K('sin', 'sin(', { s: 'sin⁻¹', sv: 'sin⁻¹(', c: 'f' }),
+        K('cos', 'cos(', { s: 'cos⁻¹', sv: 'cos⁻¹(', c: 'f' }),
+        K('tan', 'tan(', { s: 'tan⁻¹', sv: 'tan⁻¹(', c: 'f' }),
+        K('nCr', 'nCr(', { s: 'nPr', sv: 'nPr(', c: 'f', sm: 'sm' }),
+        K('Σ', '∑(', { s: 'Π', sv: 'Π(', c: 'f' })
+      ],
+      [
+        K('π', 'π', { s: 'e', sv: 'e', c: 'f' }),
+        K('e', 'e', { s: 'i', sv: 'i', c: 'f' }),
+        K('%', '%', { s: 'Abs', sv: 'Abs(', c: 'f' }),
+        CMD('M+', 'mplus', { s: 'M−', sv: 'mminus', c: 'f', sm: 'sm' }),
+        CMD('STO', 'sto', { s: 'RCL', sv: 'rcl', c: 'f' })
+      ]
+    ].concat(numRows()),
+    extra: [],
+    modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
+            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
+            'verify', 'mathbox', 'constants']
+  };
+
+  /* ============================================================
+     991 ES PLUS
+     ============================================================ */
+  var ES = {
+    id: 'esplus',
+    name: '991 ES Plus',
+    plate: 'MKJ-991ES PLUS',
+    model: '991ES',
+    series: 'MKJ SERIES',
+    brand: 'MKJ CALC',
+    cols: 5,
+    shape: 'classic',
+    controls: [
+      { keys: [
+        CMD('SHIFT', 'shift', { c: 'shift', sm: 'xs' }),
+        CMD('ALPHA', 'alpha', { c: 'alpha', sm: 'xs' }),
+        null,
+        CMD('MODE', 'mode', { c: 'ctl', sm: 'xs', round: true }),
+        CMD('ON', 'on', { c: 'ctl', sm: 'xs', round: true })
+      ] },
+      { keys: [
+        CMD('◀', 'left', { c: 'ctl nav', ic: 'left' }),
+        CMD('▲', 'up', { c: 'ctl nav', ic: 'up' }),
+        CMD('OK', 'ok', { c: 'ctl ok' }),
+        CMD('▼', 'down', { c: 'ctl nav', ic: 'down' }),
+        CMD('▶', 'right', { c: 'ctl nav', ic: 'right' })
+      ] }
+    ],
+    rows: [
+      [
+        CMD('CALC', 'calc', { c: 'f', sm: 'xs' }),
+        CMD('SOLVE', 'solve', { c: 'f', sm: 'xs' }),
+        K('∫dx', '∫(', { s: 'd/dx', sv: 'd/dx(', c: 'f', sm: 'xs' }),
+        K('x²', '²', { s: 'x³', sv: '³', c: 'f' }),
+        K('x^', '^', { s: 'ˣ√', sv: '^(1/', c: 'f' })
+      ],
+      [
+        K('√', '√(', { s: '∛', sv: '∛(', c: 'f' }),
+        K('log', 'log(', { s: '10ˣ', sv: '×10^(', c: 'f' }),
+        K('ln', 'ln(', { s: 'eˣ', sv: 'exp(', c: 'f' }),
+        K('(-)', '-', { s: '∠', sv: '∠', c: 'f' }),
+        K('°′″', '°', { s: 'ENG', sv: 'eng', c: 'f', sm: 'xs' })
+      ],
+      [
+        K('hyp', 'sinh(', { s: 'sinh⁻¹', sv: 'sinh⁻¹(', c: 'f', sm: 'xs' }),
+        K('sin', 'sin(', { s: 'sin⁻¹', sv: 'sin⁻¹(', c: 'f' }),
+        K('cos', 'cos(', { s: 'cos⁻¹', sv: 'cos⁻¹(', c: 'f' }),
+        K('tan', 'tan(', { s: 'tan⁻¹', sv: 'tan⁻¹(', c: 'f' }),
+        K('Abs', 'Abs(', { s: 'Conjg', sv: 'Conjg(', c: 'f', sm: 'sm' })
+      ],
+      [
+        K('x!', '!', { s: 'nPr', sv: 'nPr(', c: 'f' }),
+        K('nCr', 'nCr(', { s: 'Π', sv: 'Π(', c: 'f', sm: 'sm' }),
+        K('Σ', '∑(', { s: 'Pol', sv: 'Pol(', c: 'f' }),
+        K('x⁻¹', '^(-1)', { c: 'f', sm: 'sm' }),
+        CMD('S⇔D', 'sd', { c: 'f', sm: 'sm' })
+      ],
+      [
+        K('π', 'π', { s: 'e', sv: 'e', c: 'f' }),
+        K('e', 'e', { s: 'i', sv: 'i', c: 'f' }),
+        K('%', '%', { s: 'Abs', sv: 'Abs(', c: 'f' }),
+        CMD('M+', 'mplus', { s: 'M−', sv: 'mminus', c: 'f', sm: 'sm' }),
+        CMD('STO', 'sto', { s: 'RCL', sv: 'rcl', c: 'f' })
+      ]
+    ].concat(numRows()),
+    extra: [],
+    modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
+            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
+            'verify', 'mathbox', 'constants']
+  };
+
+  /* ---------------- catalog ---------------- */
   var CATALOG = [
     { group: 'Numeric', items: ['x²', 'x³', '^(-1)', '^(1/', '^', '√(', '∛(', 'Abs(', 'x!', '%'] },
-    { group: 'Logarithm', items: ['log(', 'ln(', 'log(', 'exp(', '×10^('] },
+    { group: 'Logarithm', items: ['log(', 'ln(', '10^(', 'exp('] },
     { group: 'Trigonometry', items: ['sin(', 'cos(', 'tan(', 'sin⁻¹(', 'cos⁻¹(', 'tan⁻¹(',
-                                     'sinh(', 'cosh(', 'tanh(', 'sinh⁻¹(', 'cosh⁻¹(', 'tanh⁻¹('] },
+                                     'sinh(', 'cosh(', 'tanh('] },
     { group: 'Complex', items: ['i', 'Conjg(', 'Arg(', 'Re(', 'Im(', '∠'] },
     { group: 'Probability', items: ['nCr(', 'nPr(', '!', 'rand', 'randInt('] },
     { group: 'Integer', items: ['gcd(', 'lcm(', 'floor(', 'ceil(', 'round(', 'frac(', 'sign(', 'min(', 'max('] },
     { group: 'Calculus', items: ['∫(', 'd/dx(', '∑(', 'Π('] },
-    { group: 'Coordinate', items: ['Pol(', 'Rec('] },
     { group: 'Variables', items: ['A', 'B', 'C', 'D', 'E', 'F', 'M', 'x', 'y'] },
     { group: 'Constants', items: ['π', 'e', 'i', 'Ans'] }
   ];
 
   global.MKJLayouts = {
     esplus: ES, explus: EX, cw: CW,
-    order: ['esplus', 'explus', 'cw'],
+    order: ['cw', 'explus', 'esplus'],
     catalog: CATALOG
   };
 

@@ -102,7 +102,8 @@
       focused.value = focused.value.slice(0, -1);
       focused.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    container.appendChild(pad);
+    if (app && app.setDock) app.setDock(function (dock) { dock.appendChild(pad); });
+    else container.appendChild(pad);
     return { pad: pad, rebind: bind };
   }
 
@@ -118,8 +119,8 @@
       .map(function (t) { return t.trim(); });
   }
 
-  /* compact 9-key number pad (+ its own insert callback) */
-  function numPad(onKey, onClear, onDel) {
+  /* compact number pad — the workspace shows exactly one at a time */
+  function numPad(onKey, onClear, onDel, app) {
     var wrap = el('div', 'minipad');
     ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '(-)'].forEach(function (label) {
       var b = el('button', 'mp-key', label);
@@ -784,9 +785,7 @@
       root.appendChild(p);
 
       /* number pad that types into whichever coefficient box was touched */
-      var padHost = el('div');
-      p.appendChild(padHost);
-      var padApi = attachPad(padHost, function () {
+      var padApi = attachPad(p, function () {
         return Array.prototype.slice.call(box.querySelectorAll('input'));
       }, app);
       deg.addEventListener('change', function () { setTimeout(padApi.rebind, 0); });
@@ -1217,9 +1216,7 @@
         } catch (e) { setOut(out, e.message, true); }
       }
       p.appendChild(row);
-      var rPadHost = el('div');
-      p.appendChild(rPadHost);
-      attachPad(rPadHost, function () { return ['a','b','c','d'].map(function (k) { return inputs[k]; }); }, app);
+      attachPad(p, function () { return ['a','b','c','d'].map(function (k) { return inputs[k]; }); }, app);
       p.appendChild(out);
       root.appendChild(p);
       run();
