@@ -100,6 +100,7 @@ body {
 
 /* ---------------- LCD ---------------- */
 .lcd {
+  position: relative;
   flex: 0 0 auto; height: 132px; overflow: hidden;
   margin: 0 6px;
   border-radius: 3px;
@@ -150,6 +151,34 @@ body {
   font-size: 7.5px; letter-spacing: 4.2px; font-weight: 800;
   color: #d5dade; opacity: .92;
 }
+
+/* ---------------- LCD system menus (SETTINGS / FORMAT / TOOLS) ---------------- */
+.lcd-menu[hidden] { display: none !important; }
+.lcd-menu {
+  position: absolute; inset: 4px 5px;
+  background: linear-gradient(180deg, #cbd8d2 0%, #b9c7c1 100%);
+  font-family: var(--mono); color: var(--lcd-ink);
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 2px; z-index: 3;
+}
+.lcd-menu.sub .lm-title { background: rgba(17,26,23,.10); }
+.lcd-menu .lm-title {
+  font-family: var(--sans); font-size: 8px; font-weight: 800;
+  letter-spacing: 1.6px; text-transform: uppercase;
+  padding: 2px 3px 3px; border-bottom: 1px solid rgba(17,26,23,.35);
+  color: var(--lcd-ink);
+}
+.lcd-menu .lm-list { flex: 1; overflow-y: auto; scrollbar-width: none; }
+.lcd-menu .lm-list::-webkit-scrollbar { width: 0; }
+.lcd-menu .lm-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 2px 4px; font-size: 8.5px; cursor: pointer;
+  border-bottom: 1px dotted rgba(17,26,23,.16);
+}
+.lcd-menu .lm-row span { font-family: var(--sans); font-size: 8px; font-weight: 600; }
+.lcd-menu .lm-row b { font-family: var(--mono); font-size: 7.8px; font-weight: 800; }
+.lcd-menu .lm-row.on { background: var(--lcd-ink); color: var(--lcd-a); }
+.lcd-menu .lm-row.on span { color: var(--lcd-a); }
 
 /* ---------------- home icon grid (CW) ---------------- */
 .home-grid {
@@ -490,6 +519,20 @@ body[data-shape="classic"] .key { border-radius: 5px; }
 .hitem .r { font-family: var(--mono); font-size: 13px; font-weight: 700; text-align: right; }
 .empty { text-align: center; color: var(--dim); font-size: 11px; padding: 20px 0; }
 
+.var-tabs {
+  display: flex; gap: 5px; margin: 0 0 9px;
+}
+.var-tabs button, .var-tabs button:not(.on) { font-family: var(--sans); }
+body[data-lang="bn"] .sheet-h h2,
+body[data-lang="bn"] .var-tabs button { text-transform: none; letter-spacing: 0; }
+body[data-lang="bn"] .hint { font-family: "Noto Sans Bengali", "Hind Siliguri", var(--sans); }
+.var-tabs button {
+  flex: 1; padding: 6px 0; border-radius: 7px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05);
+  color: #d8dde3; font: 700 10px/1 var(--sans); letter-spacing: .8px; text-transform: uppercase;
+}
+.var-tabs button.on { background: #d9cd9b; color: #1b1b1a; border-color: #e6dbb0; }
+
 .var-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .vbtn {
   border: 1px solid var(--line); background: rgba(255,255,255,.05); color: var(--ink);
@@ -628,9 +671,12 @@ body[data-shape="classic"] .key { border-radius: 5px; }
 .sheet-cell { padding: 5px 3px; background: rgba(255,255,255,.05); border-radius: 3px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .sheet-cell.is-active { outline: 1px solid var(--gold); }
 .sheet-cell.is-error { color: #ff9a92; }
-.const-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.const-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .const-item { text-align: left; border: 1px solid var(--line); background: rgba(255,255,255,.05); color: var(--ink); border-radius: 7px; padding: 6px 7px; cursor: pointer; font-family: var(--sans); display: flex; flex-direction: column; gap: 1px; }
-.const-item b { font-family: var(--mono); font-size: 10.5px; color: var(--gold); }
+.const-item b { font-family: var(--mono); font-size: 13px; color: var(--gold); }
+.const-item span { font-size: 10px; color: #b9c0c7; }
+.const-item small { font-family: var(--mono); font-size: 8.6px; color: #8d959c; }
+.const-item:hover { background: rgba(255,255,255,.1); }
 .const-item span { font-size: 8.5px; color: var(--dim); }
 .const-item small { font-family: var(--mono); font-size: 8px; }
 .dice-res { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }

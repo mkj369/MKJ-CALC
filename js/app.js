@@ -22,7 +22,14 @@
     expr: '',
     caret: 0,
     ans: 0,
-    vars: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, M: 0 },
+    vars: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, M: 0, x: 0, y: 0, z: 0 },
+    ioMode: 'math',
+    freq: false,
+    contrast: 3,
+    lang: 'en',
+    fracMode: true,
+    digits: 10,
+    sciDigits: 10,
     shift: false,
     alpha: false,
     hsel: 0,
@@ -113,7 +120,9 @@
       format: S.format,
       complex: S.mode === 'complex' || S.mode === 'equation',
       complexFormat: S.complexFormat,
-      angle: S.angle
+      angle: S.angle,
+      digits: S.digits,
+      sciDigits: S.sciDigits
     };
   }
 
@@ -143,11 +152,13 @@
   function paint() {
     var lay = LAY[S.model];
     $('topPlate').textContent = lay.plate;
-    $('topMode').textContent = S.home ? 'Home' : (MODES[S.mode] || MODES.calc).name;
+    $('topMode').textContent = LCD_MENU ? LCD_MENU.title
+      : (S.home ? 'Home' : (MODES[S.mode] || MODES.calc).name);
     $('plateBrand').textContent = lay.brand || 'MKJ CALC';
     $('plateModel').textContent = lay.model;
     $('footModel').textContent = lay.model;
     setHome(S.home);
+    if (LCD_MENU) { $('screenMain').hidden = true; $('homeScreen').hidden = true; $('lcdMenu').hidden = false; }
     $('lcdMode').textContent = ({
       calc: 'COMP', complex: 'CMPLX', stat: 'STAT', dist: 'DIST', matrix: 'MATRIX',
       vector: 'VECTOR', equation: 'EQN', inequality: 'INEQ', basen: 'BASE',
@@ -525,6 +536,13 @@
   }
 
   function showValue(v) {
+    /* list results (vectors, random lists) and factorisations carry their own text */
+    if (v && v.list) {
+      S.result = v.text || '[' + v.list.join('  ') + ']';
+      S.raw = null; S.frac = null; S.sdStage = 0; S.isError = false;
+      S.resultSub = v.list.length + ' element' + (v.list.length === 1 ? '' : 's');
+      return;
+    }
     var z = E.C.isPair(v) ? null : E.C.to(v);
     S.raw = v;
     if (z && Math.abs(z.im) < 1e-12) {
@@ -549,6 +567,7 @@
       else if (pi) S.resultSub = pi;
       else if (fr) S.resultSub = fr;
     }
+    if (v && v.text) S.resultSub = v.text;
     S.isError = false;
   }
 
@@ -612,6 +631,13 @@
   };
 
   function press(key) {
+    /* an open LCD menu (SETTINGS / FORMAT / TOOLS) owns the keypad */
+    if (LCD_MENU && (key.act === 'cmd')) {
+      var nav = ['up', 'down', 'scrollup', 'scrolldown', 'ok', 'equals', 'ac', 'left'];
+      if (nav.indexOf(key.v) >= 0) { lcdMenuKey(key.v); return; }
+      if (key.v === 'home' || key.v === 'on') { closeLcdMenu(); return; }
+      return;
+    }
     if (key.act === 'cmd' && key.v === 'shift') {
       S.shift = !S.shift; S.alpha = false; paint(); return;
     }
@@ -642,7 +668,7 @@
       case 'off': clearAll(); toast('MKJ CALC'); break;
       case 'del': del(); break;
       case 'equals': if (S.home) homeOpen(); else equals(); break;
-      case 'sd': toggleSD(); break;
+      case 'sd': openLcdMenu('Number Format', FORMAT_ITEMS); break;
       case 'ans': insert('Ans'); break;
       case 'left':
         if (S.home) homeMove(-1);
@@ -656,7 +682,11 @@
       case 'down': if (S.home) homeMove(4); else browse(1); break;
       case 'scrollup': if (S.home) homeMove(-1); else browse(-1); break;
       case 'scrolldown': if (S.home) homeMove(1); else browse(1); break;
-      case 'mode': showModes(); break;
+      case 'mode':
+      case 'modes':
+        if (LCD_MENU) closeLcdMenu();
+        showModes();
+        break;
       case 'home':
         S.home = true;
         $('workspace').hidden = true;
@@ -664,8 +694,14 @@
         paint();
         break;
       case 'ok': if (S.home) homeOpen(); else showModes(); break;
-      case 'settings': case 'tools': openMenu(); break;
+      case 'settings':
+        openLcdMenu('Settings', SETTINGS_ITEMS);
+        break;
+      case 'tools':
+        openLcdMenu('Tools', TOOLS_ITEMS);
+        break;
       case 'catalog': openCatalog(); break;
+      case 'function': openVars('insert'); break;
       case 'variable': openVars('insert'); break;
       case 'sto': openVars('store'); break;
       case 'rcl': openVars('recall'); break;
@@ -748,6 +784,201 @@
     show('sheetModels');
   }
 
+
+  /* ============================================================
+     LCD menus — SETTINGS / FORMAT / TOOLS
+     Rendered inside the display exactly like the CW system menus.
+     Arrow keys move, OK/EXE selects, AC/left backs out.
+     ============================================================ */
+  var LCD_MENU = null;   /* { title, items:[{id,label,value,opts,help}], i, depth } */
+
+  var ANGLE_OPTS = [['deg', 'Degree'], ['rad', 'Radian'], ['grad', 'Gradian']];
+  var FORMAT_OPTS = [
+    ['norm', 'Norm 1'], ['fix2', 'Fix 2'], ['fix3', 'Fix 3'], ['fix4', 'Fix 4'],
+    ['sci', 'Sci'], ['eng', 'Eng'], ['frac', 'Fraction'], ['pi', 'π-form']
+  ];
+  var COMPLEX_OPTS = [['rect', 'a+bi'], ['polar', 'r∠θ']];
+  var IO_OPTS = [['math', 'MathI/O'], ['line', 'LineI/O']];
+  var FREQ_OPTS = [['off', 'Frequency: Off'], ['on', 'Frequency: On']];
+
+  var SETTINGS_ITEMS = [
+    { id: 'angle', label: 'Angle Unit', get: function () { return S.angle; }, opts: ANGLE_OPTS,
+      set: function (v) { S.angle = v; } },
+    { id: 'io', label: 'Input/Output', get: function () { return S.ioMode || 'math'; }, opts: IO_OPTS,
+      set: function (v) { S.ioMode = v; } },
+    { id: 'format', label: 'Number Format', get: function () { return S.format; }, opts: FORMAT_OPTS,
+      set: function (v) { S.format = v; } },
+    { id: 'complex', label: 'Complex Result', get: function () { return S.complexFormat; }, opts: COMPLEX_OPTS,
+      set: function (v) { S.complexFormat = v; } },
+    { id: 'freq', label: 'Frequency', get: function () { return S.freq ? 'on' : 'off'; }, opts: FREQ_OPTS,
+      set: function (v) { S.freq = v === 'on'; } },
+    { id: 'contrast', label: 'Display Contrast', get: function () { return String(S.contrast == null ? 3 : S.contrast); },
+      opts: [['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']],
+      set: function (v) { S.contrast = Number(v); applyContrast(); } },
+    { id: 'lang', label: 'Language', get: function () { return S.lang || 'en'; },
+      opts: [['en', 'English'], ['bn', 'বাংলা']],
+      set: function (v) { S.lang = v; applyLang(); } },
+    { id: 'sound', label: 'Key Sound', get: function () { return S.sound ? 'on' : 'off'; },
+      opts: [['on', 'On'], ['off', 'Off']], set: function (v) { S.sound = v === 'on'; } },
+    { id: 'haptic', label: 'Vibration', get: function () { return S.haptic ? 'on' : 'off'; },
+      opts: [['on', 'On'], ['off', 'Off']], set: function (v) { S.haptic = v === 'on'; } },
+    { id: 'reset', label: 'Reset', get: function () { return 'All'; },
+      opts: [['all', 'Reset all'], ['cancel', 'Cancel']],
+      set: function (v) { if (v === 'all') doReset(); } }
+  ];
+
+  var FORMAT_ITEMS = [
+    { id: 'sd', label: 'S ⇔ D  Result Form', get: function () { return 'Toggle'; },
+      opts: [['go', 'Toggle now']],
+      set: function () { closeLcdMenu(); toggleSD(); } },
+    { id: 'fmt', label: 'Number Format', get: function () { return S.format; }, opts: FORMAT_OPTS,
+      set: function (v) { S.format = v; if (S.raw != null && S.mode === 'calc') S.result = E.formatValue(S.raw, fmtOpts()); } },
+    { id: 'frac', label: 'Fraction Result', get: function () { return S.fracMode ? 'on' : 'off'; },
+      opts: [['on', 'On'], ['off', 'Off']], set: function (v) { S.fracMode = v === 'on'; } },
+    { id: 'dec', label: 'Display Digits', get: function () { return String(S.digits == null ? 10 : S.digits); },
+      opts: [['6', '6'], ['8', '8'], ['10', '10'], ['12', '12']],
+      set: function (v) { S.digits = Number(v); } },
+    { id: 'sci', label: 'Sci. Sig. Digits', get: function () { return String(S.sciDigits == null ? 10 : S.sciDigits); },
+      opts: [['4', '4'], ['6', '6'], ['8', '8'], ['10', '10']],
+      set: function (v) { S.sciDigits = Number(v); } }
+  ];
+
+  var TOOLS_ITEMS = [
+    { id: 'hist', label: 'Calculation History', get: function () { return String(S.history.length); },
+      opts: [['open', 'Open history'], ['clear', 'Clear history']],
+      set: function (v) { closeLcdMenu(); if (v === 'open') openHistory(); else { S.history = []; save(); paint(); toast(L('cleared')); } } },
+    { id: 'vars', label: 'Variable Manager', get: function () { return 'A – F, x, y, z'; },
+      opts: [['open', 'Open variables']], set: function () { closeLcdMenu(); openVars('insert'); } },
+    { id: 'catalog', label: 'Function Catalog', get: function () { return '…'; },
+      opts: [['open', 'Open catalog']], set: function () { closeLcdMenu(); openCatalog(); } },
+    { id: 'about', label: 'About', get: function () { return 'MKJ-991CW'; },
+      opts: [['open', 'Precision Meets Intelligence']], set: function () { closeLcdMenu(); } }
+  ];
+
+  function optLabel(opts, v) {
+    for (var i = 0; i < opts.length; i++) if (opts[i][0] === v) return opts[i][1];
+    return v;
+  }
+
+  function openLcdMenu(title, items) {
+    LCD_MENU = { title: title, items: items, i: 0, depth: 0 };
+    S.home = false;
+    $('homeScreen').hidden = true;
+    $('screenMain').hidden = true;
+    renderLcdMenu();
+    paint();
+  }
+
+  function closeLcdMenu() {
+    LCD_MENU = null;
+    var host = $('lcdMenu');
+    if (host) host.hidden = true;
+    $('screenMain').hidden = false;
+    paint();
+  }
+
+  function renderLcdMenu() {
+    var host = $('lcdMenu');
+    if (!host) return;
+    if (!LCD_MENU) { host.hidden = true; return; }
+    host.hidden = false;
+    host.classList.toggle('sub', LCD_MENU.depth > 0);
+    var m = LCD_MENU;
+    var html = '<div class="lm-title">' + (m.depth ? 'Select' : m.title) + '</div><div class="lm-list">';
+
+    if (m.depth === 0) {
+      m.items.forEach(function (it, i) {
+        var val = it.get ? it.get() : '';
+        var shown = it.opts ? optLabel(it.opts, val) : val;
+        html += '<div class="lm-row' + (i === m.i ? ' on' : '') + '" data-i="' + i + '">' +
+                  '<span>' + it.label + '</span><b>' + shown + '</b></div>';
+      });
+    } else {
+      var it = m.items[m.i];
+      var cur = it.get ? it.get() : '';
+      it.opts.forEach(function (o, j) {
+        html += '<div class="lm-row' + (o[0] === cur ? ' on' : '') + '" data-o="' + j + '">' +
+                  '<span>' + o[1] + '</span><b>' + (o[0] === cur ? '✓' : '') + '</b></div>';
+      });
+    }
+    html += '</div>';
+    host.innerHTML = html;
+
+    var onRow = host.querySelector('.lm-row.on');
+    if (onRow && onRow.scrollIntoView) {
+      try { onRow.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    }
+
+    Array.prototype.forEach.call(host.querySelectorAll('.lm-row'), function (row) {
+      row.addEventListener('click', function () {
+        if (row.dataset.o != null) { chooseOption(Number(row.dataset.o)); }
+        else { LCD_MENU.i = Number(row.dataset.i); enterItem(); }
+      });
+    });
+  }
+
+  function enterItem() {
+    var it = LCD_MENU.items[LCD_MENU.i];
+    if (!it) return;
+    if (it.opts) { LCD_MENU.depth = 1; renderLcdMenu(); }
+  }
+
+  function chooseOption(j) {
+    var it = LCD_MENU.items[LCD_MENU.i];
+    if (!it || !it.opts[j]) return;
+    it.set(it.opts[j][0]);
+    LCD_MENU.depth = 0;
+    renderLcdMenu();
+    paint();
+    save();
+  }
+
+  function lcdMenuKey(v) {
+    var m = LCD_MENU;
+    if (!m) return false;
+    if (m.depth === 0) {
+      if (v === 'up' || v === 'scrollup') { m.i = (m.i - 1 + m.items.length) % m.items.length; renderLcdMenu(); return true; }
+      if (v === 'down' || v === 'scrolldown') { m.i = (m.i + 1) % m.items.length; renderLcdMenu(); return true; }
+      if (v === 'ok' || v === 'equals') { enterItem(); return true; }
+      if (v === 'ac' || v === 'left') { closeLcdMenu(); return true; }
+      return true;   /* swallow the pad while a menu is open */
+    }
+    var it = m.items[m.i];
+    var cur = it.get ? it.get() : '';
+    var idx = 0;
+    it.opts.forEach(function (o, j) { if (o[0] === cur) idx = j; });
+    if (v === 'up' || v === 'scrollup') { chooseOption((idx - 1 + it.opts.length) % it.opts.length); return true; }
+    if (v === 'down' || v === 'scrolldown') { chooseOption((idx + 1) % it.opts.length); return true; }
+    if (v === 'ok' || v === 'equals') { chooseOption(idx); return true; }
+    if (v === 'ac' || v === 'left') { m.depth = 0; renderLcdMenu(); return true; }
+    return true;
+  }
+
+  function applyContrast() {
+    var v = S.contrast == null ? 3 : S.contrast;
+    var lcd = $('lcd');
+    if (lcd) lcd.style.setProperty('--contrast', String((v - 3) * 0.12));
+    document.body.dataset.contrast = v;
+  }
+
+  function applyLang() {
+    var lang = S.lang === 'bn' ? 'bn' : 'en';
+    document.documentElement.lang = lang;
+    document.body.dataset.lang = lang;
+    if (LCD_MENU) renderLcdMenu();
+  }
+
+  function doReset() {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    S.angle = 'deg'; S.format = 'norm'; S.complexFormat = 'rect';
+    S.sound = true; S.haptic = true; S.theme = 'dark';
+    S.contrast = 3; S.lang = 'en'; S.ioMode = 'math'; S.freq = false;
+    S.vars = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, M: 0, x: 0, y: 0, z: 0 };
+    S.history = [];
+    applyContrast(); applyLang(); save(); paint();
+    toast(L('reset'));
+  }
+
   function showModes() {
     var grid = $('modeGrid');
     grid.innerHTML = '';
@@ -800,12 +1031,37 @@
     show('sheetHistory');
   }
 
+  /* UI strings the calculator itself shows. Maths notation never changes. */
+  var STR = {
+    en: {
+      vars: 'Variables', store: 'Store Ans', recall: 'Recall',
+      storeHint: 'Write the value of Ans into the variable',
+      recallHint: 'The variable value is placed in the result line',
+      insertHint: 'Insert a variable into the expression',
+      cleared: 'History cleared', reset: 'Reset complete'
+    },
+    bn: {
+      vars: 'ভেরিয়েবল', store: 'Ans সংরক্ষণ', recall: 'রিকল',
+      storeHint: 'Ans এর মান ভেরিয়েবলে রাখা হবে',
+      recallHint: 'ভেরিয়েবলের মান রেসল্ট লাইনে বসবে',
+      insertHint: 'এক্সপ্রেশনে ভেরিয়েবল বসাবে',
+      cleared: 'হিস্ট্রি মুছে ফেলা হয়েছে', reset: 'রিসেট সম্পন্ন'
+    }
+  };
+  function L(key) { return (STR[S.lang] || STR.en)[key] || STR.en[key]; }
+
   function openVars(mode) {
     S.varMode = mode;
-    $('varsTitle').textContent = mode === 'store' ? 'Store Ans' : mode === 'recall' ? 'Recall' : 'Variables';
-    $('varsHint').textContent = mode === 'store'
-      ? 'Ans এর মান ভেরিয়েবলে রাখা হবে'
-      : mode === 'recall' ? 'ভেরিয়েবলের মান রেসাল্ট লাইনে বসবে' : 'এক্সপ্রেশনে ভেরিয়েবল বসাবে';
+    Array.prototype.forEach.call(document.querySelectorAll('#varTabs button'), function (b) {
+      b.classList.toggle('on', b.dataset.vm === mode);
+      if (!b.dataset.wired) {
+        b.dataset.wired = '1';
+        b.addEventListener('click', function () { openVars(b.dataset.vm); });
+      }
+    });
+    $('varsTitle').textContent = mode === 'store' ? L('store') : mode === 'recall' ? L('recall') : L('vars');
+    $('varsHint').textContent = mode === 'store' ? L('storeHint')
+      : mode === 'recall' ? L('recallHint') : L('insertHint');
     var g = $('varGrid');
     g.innerHTML = '';
     Object.keys(S.vars).forEach(function (k) {
@@ -813,7 +1069,7 @@
       b.appendChild(el('b', null, k));
       b.appendChild(el('span', null, E.formatValue(S.vars[k], { format: 'norm' })));
       b.addEventListener('click', function () {
-        if (mode === 'store') { S.vars[k] = S.ans; save(); closeSheet(); toast('Ans → ' + k); }
+        if (mode === 'store') { S.vars[k] = S.ans; save(); closeSheet(); toast('Ans → ' + k); paint(); }
         else if (mode === 'recall') {
           S.ans = S.vars[k];
           S.raw = S.vars[k];
@@ -996,6 +1252,12 @@
     return {
       state: S,
       dock: dock || null,
+      pushHistory: function (expr, res) {
+        S.history.unshift({ e: expr, r: res });
+        if (S.history.length > 60) S.history.pop();
+        save();
+      },
+      vars: S.vars,
       setDock: function (fn) {
         if (!wsDock) return;
         wsDock.innerHTML = '';
@@ -1071,7 +1333,7 @@
     $('btnCatalog').addEventListener('click', openCatalog);
     $('btnHelp').addEventListener('click', function () { show('sheetHelp'); });
     $('clearHist').addEventListener('click', function () {
-      S.history = []; save(); openHistory(); toast('History cleared');
+      S.history = []; save(); openHistory(); toast(L('cleared'));
     });
 
     $('setAngle').addEventListener('change', function (e) { S.angle = e.target.value; save(); paint(); });
@@ -1104,22 +1366,59 @@
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
     if (!$('workspace').hidden) return;
 
-    var k = ev.key;
+    var k = ev.key, mod = ev.ctrlKey || ev.metaKey;
+
+    /* ---- hardware keys that mirror the physical keypad ---- */
+    if (mod) {
+      if (k === 'r' || k === 'R') { ev.preventDefault(); clearAll(); return; }        /* AC  */
+      if (k === 'h' || k === 'H') { ev.preventDefault(); S.home = true; paint(); return; }
+      return;
+    }
+    switch (k) {
+      case 'Enter':
+        ev.preventDefault();
+        if (LCD_MENU) { lcdMenuKey('equals'); return; }
+        if (S.home) { homeOpen(); return; }
+        equals(); return;
+      case '=':
+        ev.preventDefault();
+        if (LCD_MENU) { lcdMenuKey('equals'); return; }
+        equals(); return;
+      case 'Backspace': ev.preventDefault(); if (LCD_MENU) return; del(); return;
+      case 'Delete': ev.preventDefault(); clearAll(); return;                          /* AC  */
+      case 'Escape':
+        ev.preventDefault();
+        if (LCD_MENU) { closeLcdMenu(); return; }
+        if (openSheet) { closeSheet(); return; }
+        if (!$('homeScreen').hidden) return;
+        clearAll(); return;
+      case 'ArrowLeft':
+        ev.preventDefault();
+        if (LCD_MENU) { lcdMenuKey('left'); return; }
+        if (S.home) { homeMove(-1); return; }
+        S.caret = Math.max(0, S.caret - 1); paint(); return;
+      case 'ArrowRight':
+        ev.preventDefault();
+        if (S.home) { homeMove(1); return; }
+        S.caret = Math.min(S.expr.length, S.caret + 1); paint(); return;
+      case 'ArrowUp': ev.preventDefault(); if (LCD_MENU) { lcdMenuKey('up'); return; } if (S.home) homeMove(-4); else browse(-1); return;
+      case 'ArrowDown': ev.preventDefault(); if (LCD_MENU) { lcdMenuKey('down'); return; } if (S.home) homeMove(4); else browse(1); return;
+      /* F-keys map to the CW control cluster */
+      case 'F1': ev.preventDefault(); press({ act: 'cmd', v: 'shift' }); return;
+      case 'F2': ev.preventDefault(); openVars('insert'); return;
+      case 'F3': ev.preventDefault(); openCatalog(); return;
+      case 'F4': ev.preventDefault(); openLcdMenu('Settings', SETTINGS_ITEMS); return;
+      case 'F5': ev.preventDefault(); showModes(); return;
+      case 'F9': ev.preventDefault(); openLcdMenu('Number Format', FORMAT_ITEMS); return;
+    }
     if (/^[0-9.]$/.test(k)) { insert(k); ev.preventDefault(); return; }
     if ('+-*/^()%'.indexOf(k) >= 0) { insert(k); ev.preventDefault(); return; }
-    switch (k) {
-      case 'Enter': case '=': equals(); ev.preventDefault(); return;
-      case 'Backspace': del(); ev.preventDefault(); return;
-      case 'Escape': if (openSheet) closeSheet(); else clearAll(); ev.preventDefault(); return;
-      case 'ArrowLeft': S.caret = Math.max(0, S.caret - 1); paint(); ev.preventDefault(); return;
-      case 'ArrowRight': S.caret = Math.min(S.expr.length, S.caret + 1); paint(); ev.preventDefault(); return;
-      case 'ArrowUp': browse(-1); ev.preventDefault(); return;
-      case 'ArrowDown': browse(1); ev.preventDefault(); return;
-    }
     if (k === 'p') { insert('π'); ev.preventDefault(); return; }
     if (k === 'e') { insert('e'); ev.preventDefault(); return; }
     if (k === 'i') { insert('i'); ev.preventDefault(); return; }
-    if (/^[A-Fa-fMmyx]$/.test(k)) { insert(k.toUpperCase()); ev.preventDefault(); return; }
+    if (/^[A-Fa-fMmyxz]$/.test(k)) { insert(k.toUpperCase()); ev.preventDefault(); return; }
+    if (k === '!') { insert('!'); ev.preventDefault(); return; }
+    if (k === 'r' && ev.altKey) { insert('√('); ev.preventDefault(); return; }
   }
 
   /* ---------------- boot ---------------- */

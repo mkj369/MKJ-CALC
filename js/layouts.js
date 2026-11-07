@@ -74,7 +74,7 @@
       CMD('', 'right', { c: 'ctl nav', ic: 'right', gr: 2, gc: 5 }),
       CMD('SHIFT', 'shift', { c: 'shift', ic: 'shift', gr: 3, gc: 1, cap: 'SHIFT' }),
       CMD('VARIABLE', 'variable', { c: 'ctl', ic: 'var', gr: 3, gc: 2, cap: 'VARIABLE' }),
-      CMD('FUNCTION', 'catalog', { c: 'ctl', ic: 'func', gr: 3, gc: 3, cap: 'FUNCTION' }),
+      CMD('FUNCTION', 'function', { c: 'ctl', ic: 'func', gr: 3, gc: 3, cap: 'FUNCTION' }),
       CMD('', 'down', { c: 'ctl nav', ic: 'down', gr: 3, gc: 4 }),
       CMD('CATALOG', 'catalog', { c: 'ctl', ic: 'book', gr: 3, gc: 5, cap: 'CATALOG' }),
       CMD('TOOLS', 'tools', { c: 'ctl', ic: 'tools', gr: 3, gc: 6, cap: 'TOOLS' })
@@ -252,8 +252,10 @@
     { group: 'Trigonometry', items: ['sin(', 'cos(', 'tan(', 'sin⁻¹(', 'cos⁻¹(', 'tan⁻¹(',
                                      'sinh(', 'cosh(', 'tanh('] },
     { group: 'Complex', items: ['i', 'Conjg(', 'Arg(', 'Re(', 'Im(', '∠'] },
-    { group: 'Probability', items: ['nCr(', 'nPr(', '!', 'rand', 'randInt('] },
-    { group: 'Integer', items: ['gcd(', 'lcm(', 'floor(', 'ceil(', 'round(', 'frac(', 'sign(', 'min(', 'max('] },
+    { group: 'Probability', items: ['nCr(', 'nPr(', '!', 'rand', 'RanInt(', 'RanList('] },
+    { group: 'Integer', items: ['GCD(', 'LCM(', 'mod', 'PrimeFac(', 'isPrime(', 'floor(', 'ceil(',
+                                'round(', 'frac(', 'sign(', 'min(', 'max('] },
+    { group: 'Vector', items: ['Vector(', 'Dot(', 'Cross(', 'Mag(', 'UnitV(', 'Angle('] },
     { group: 'Calculus', items: ['∫(', 'd/dx(', '∑(', 'Π('] },
     { group: 'Variables', items: ['A', 'B', 'C', 'D', 'E', 'F', 'M', 'x', 'y'] },
     { group: 'Constants', items: ['π', 'e', 'i', 'Ans'] }

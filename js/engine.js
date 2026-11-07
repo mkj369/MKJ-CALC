@@ -62,6 +62,7 @@
     },
     isReal: function (z) { return !C.isC(z) || Math.abs(z.im) < 1e-12; },
     clean: function (z) {
+      if (z && z.list) return z;
       if (!C.isC(z)) {
         var v = Math.round(z * 1e12) / 1e12;
         return Math.abs(v) < 1e-13 ? 0 : v;
@@ -121,6 +122,8 @@
     'log', 'ln', 'lg', 'log₂', 'exp',
     'sqrt', 'cbrt', 'abs', 'Abs', 'sign', 'floor', 'ceil', 'round', 'int', 'frac',
     'nCr', 'nPr', 'gcd', 'lcm', 'min', 'max', 'rand', 'randInt', 'RanInt',
+    'GCD', 'LCM', 'pfact', 'PrimeFac', 'isPrime', 'RanList', 'randList',
+    'Vector', 'vec', 'Mag', 'mag', 'UnitV', 'unitv', 'Angle', 'Dot', 'dot', 'Cross', 'cross',
     'Arg', 'Conjg', 'Re', 'Im', 'abs2',
     'Pol', 'Rec', 'd', 'Sum'
   ];
@@ -162,6 +165,7 @@
       /* postfix */
       if (c === '²') { tokens.push({ t: 'post', v: 'sq' }); i++; continue; }
       if (c === '³') { tokens.push({ t: 'post', v: 'cube' }); i++; continue; }
+      if (s.substr(i, 2) === '⁻¹') { tokens.push({ t: 'post', v: 'inv' }); i += 2; continue; }
       if (c === '!') { tokens.push({ t: 'post', v: 'fact' }); i++; continue; }
       if (c === '%') { tokens.push({ t: 'post', v: 'pct' }); i++; continue; }
       if (c === '°') { tokens.push({ t: 'post', v: 'deg' }); i++; continue; }
@@ -183,6 +187,8 @@
         if (low === 'ans') { tokens.push({ t: 'ans' }); continue; }
         if (low === 'i') { tokens.push({ t: 'imag' }); continue; }
         if (low === 'e') { tokens.push({ t: 'const', v: 'e' }); continue; }
+
+        if (low === 'mod' || low === 'rem') { tokens.push({ t: 'op', v: 'mod' }); continue; }
 
         var fn = null;
         for (var f = 0; f < FUNCS.length; f++) {
@@ -268,10 +274,16 @@
       var t = this.peek();
       if (!t) break;
 
-      if (t.t === 'op' && (t.v === '*' || t.v === '/')) {
+      if (t.t === 'op' && (t.v === '*' || t.v === '/' || t.v === 'mod')) {
         this.p++;
         var r = this.parseUnary();
-        left = t.v === '*' ? C.mul(left, r) : C.div(left, r);
+        if (t.v === '*') left = C.mul(left, r);
+        else if (t.v === '/') left = C.div(left, r);
+        else {
+          var mb = num(r);
+          if (!mb) throw mathError();
+          left = { re: num(left) % mb, im: 0 };
+        }
         continue;
       }
 
@@ -325,6 +337,11 @@
       this.p++;
       switch (t.v) {
         case 'sq': v = C.mul(v, v); break;
+        case 'inv': {
+          if (C.abs(v) < 1e-300) throw mathError();
+          v = C.div({ re: 1, im: 0 }, v);
+          break;
+        }
         case 'cube': v = C.mul(C.mul(v, v), v); break;
         case 'fact': v = { re: factorial(num(v)), im: 0 }; break;
         case 'pct': v = C.div(v, 100); break;
@@ -407,6 +424,28 @@
 
     var a = argFn();
 
+    /* list / vector functions see the whole argument pack */
+    if (name === 'Vector' || name === 'vec') return { re: 0, im: 0, list: vecOf(a) };
+    if (name === 'Mag' || name === 'mag' || name === 'Norm' || name === 'norm') {
+      return { re: vecMag(toList(a[0])), im: 0 };
+    }
+    if (name === 'UnitV' || name === 'unitv') return { re: 0, im: 0, list: vecUnit(toList(a[0])) };
+    if (name === 'Dot' || name === 'dot') return { re: vecDot(toList(a[0]), toList(a[1])), im: 0 };
+    if (name === 'Cross' || name === 'cross') return { re: 0, im: 0, list: vecCross(toList(a[0]), toList(a[1])) };
+    if (name === 'Angle' || name === 'angle') {
+      return { re: fromRadRaw(vecAngle(toList(a[0]), toList(a[1])), this.ctx.angle), im: 0 };
+    }
+    if (name === 'PrimeFac' || name === 'pfact') {
+      var pfv = primeFactors(num(a[0]));
+      return { re: Number(pfv.factors[0].split('^')[0]), im: 0, text: pfv.text };
+    }
+    if (name === 'GCD' || name === 'LCM') {
+      var ints0 = a.map(num);
+      return { re: name === 'GCD' ? gcdList(ints0) : lcmList(ints0), im: 0 };
+    }
+    if (name === 'isPrime') return { re: isPrime(num(a[0])) ? 1 : 0, im: 0 };
+    if (name === 'RanList' || name === 'randList') return { re: 0, im: 0, list: randList(num(a[0])) };
+
     /* functions that must see the complex value itself */
     var cArg = a[0];
     switch (name) {
@@ -424,7 +463,17 @@
   /* ============================================================
      5. math library
      ============================================================ */
-  function num(v) { return C.isC(v) ? v.re : v; }
+  function num(v) {
+    if (v && v.list) throw mathError();
+    return C.isC(v) ? v.re : v;
+  }
+  function isList(v) { return !!(v && v.list); }
+  function toList(v) {
+    if (!v) throw mathError();
+    if (v.list) return v.list.map(function (n) { return num(n); });
+    if (C.isC(v)) return [v.re];
+    return [v];
+  }
 
   function toRadRaw(v, unit) {
     if (unit === 'rad') return v;
@@ -467,6 +516,98 @@
     a = Math.abs(Math.round(a)); b = Math.abs(Math.round(b));
     while (b) { var t = b; b = a % b; a = t; }
     return a;
+  }
+
+
+  /* ---- integer / number theory helpers ---- */
+  function gcdList(nums) {
+    if (!nums.length) throw mathError();
+    var g = Math.abs(Math.round(nums[0]));
+    for (var i = 1; i < nums.length; i++) g = gcd2(g, nums[i]);
+    return g;
+  }
+  function lcmList(nums) {
+    if (!nums.length) throw mathError();
+    var l = Math.abs(Math.round(nums[0]));
+    for (var i = 1; i < nums.length; i++) {
+      var b = Math.abs(Math.round(nums[i]));
+      if (!l || !b) { l = 0; continue; }
+      l = l / gcd2(l, b) * b;
+    }
+    return l;
+  }
+  /* prime factorisation as "2^3×3×5", or "" for 1 */
+  function primeFactors(n) {
+    var raw = Number(n);
+    if (!isFinite(raw) || Math.abs(raw - Math.round(raw)) > 1e-9) throw mathError();
+    var v = Math.round(raw);
+    if (!isFinite(v) || v < 2) throw mathError();
+    if (v > 1e12) throw mathError();
+    var out = [], d = 2;
+    while (v > 1 && d * d <= v) {
+      var c = 0;
+      while (v % d === 0) { v /= d; c++; }
+      if (c) out.push(c > 1 ? d + '^' + c : String(d));
+      d++;
+    }
+    if (v > 1) out.push(String(v));
+    return { factors: out, text: out.join('×'), value: Math.round(Number(n)) };
+  }
+  function isPrime(n) {
+    var v = Math.round(Number(n));
+    if (v < 2) return false;
+    if (v % 2 === 0) return v === 2;
+    for (var d = 3; d * d <= v; d += 2) if (v % d === 0) return false;
+    return true;
+  }
+  /* -1..1 random, RanInt(a,b) inclusive, RanList */
+  function randInt(a, b) {
+    a = Math.round(a); b = Math.round(b);
+    if (b < a) { var t = a; a = b; b = t; }
+    return a + Math.floor(Math.random() * (b - a + 1));
+  }
+  function randList(n) {
+    n = Math.round(n);
+    if (n < 1 || n > 1000) throw mathError();
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(Math.random());
+    return out;
+  }
+
+  /* ---- vector helpers (lists of 2 or 3 numbers) ---- */
+  function vecOf(args) {
+    var v = [];
+    for (var i = 0; i < args.length; i++) v.push(num(args[i]));
+    if (v.length < 2 || v.length > 3) throw mathError();
+    return v;
+  }
+  function vecAdd(a, b) { dim(a, b); return a.map(function (x, i) { return x + b[i]; }); }
+  function vecSub(a, b) { dim(a, b); return a.map(function (x, i) { return x - b[i]; }); }
+  function dim(a, b) { if (a.length !== b.length) throw mathError(); }
+  function vecDot(a, b) {
+    dim(a, b); var t = 0;
+    for (var i = 0; i < a.length; i++) t += a[i] * b[i];
+    return t;
+  }
+  function vecCross(a, b) {
+    if (a.length !== 3 || b.length !== 3) throw mathError();
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
+  }
+  function vecMag(a) { return Math.hypot.apply(null, a); }
+  function vecUnit(a) {
+    var m = vecMag(a);
+    if (!m) throw mathError();
+    return a.map(function (x) { return x / m; });
+  }
+  function vecAngle(a, b) {
+    var d = vecDot(a, b), m = vecMag(a) * vecMag(b);
+    if (!m) throw mathError();
+    var c = Math.max(-1, Math.min(1, d / m));
+    return Math.acos(c);
   }
 
   var MathLib = {
@@ -518,10 +659,50 @@
 
         case 'nCr': return { re: nCr(x, y), im: 0 };
         case 'nPr': return { re: nPr(x, y), im: 0 };
-        case 'gcd': return { re: gcd2(x, y), im: 0 };
-        case 'lcm': return { re: Math.abs(Math.round(x) * Math.round(y)) / (gcd2(x, y) || 1), im: 0 };
+        case 'gcd': return { re: gcdList(args.map(num)), im: 0 };
+        case 'lcm': return { re: lcmList(args.map(num)), im: 0 };
         case 'min': return { re: Math.min.apply(null, args), im: 0 };
         case 'max': return { re: Math.max.apply(null, args), im: 0 };
+        case 'mod': {
+          if (args.length < 2) throw syntaxError();
+          var mb = num(args[1]);
+          if (!mb) throw mathError();
+          var r = num(args[0]) % mb;
+          return { re: r, im: 0 };
+        }
+        case 'gcd': case 'GCD': case 'lcm': case 'LCM': {
+          if (args.length < 2) throw syntaxError();
+          var ints = args.map(num);
+          return { re: (name.toLowerCase() === 'gcd' ? gcdList(ints) : lcmList(ints)), im: 0 };
+        }
+        case 'pfact': case 'PrimeFac': {
+          var pf = primeFactors(num(args[0]));
+          return { re: pf.text ? Number(pf.factors[0].split('^')[0]) : 1, im: 0, text: pf.text };
+        }
+        case 'isPrime': return { re: isPrime(num(args[0])) ? 1 : 0, im: 0 };
+        case 'RanInt': case 'randInt': {
+          if (args.length < 2) throw syntaxError();
+          return { re: randInt(num(args[0]), num(args[1])), im: 0 };
+        }
+        case 'RanList': case 'randList':
+          return { re: 0, im: 0, list: randList(num(args[0])) };
+        case 'Vector': case 'vec':
+          return { re: 0, im: 0, list: vecOf(args) };
+        case 'Dot': case 'dot':
+          if (args.length < 2) throw syntaxError();
+          return { re: vecDot(toList(args[0]), toList(args[1])), im: 0 };
+        case 'Cross': case 'cross':
+          if (args.length < 2) throw syntaxError();
+          return { re: 0, im: 0, list: vecCross(toList(args[0]), toList(args[1])) };
+        case 'Mag': case 'mag':
+          return { re: vecMag(toList(args[0])), im: 0 };
+        case 'Norm': case 'norm':
+          return { re: vecMag(toList(args[0])), im: 0 };
+        case 'UnitV': case 'unitv':
+          return { re: 0, im: 0, list: vecUnit(toList(args[0])) };
+        case 'Angle': case 'angle':
+          if (args.length < 2) throw syntaxError();
+          return { re: fromRadRaw(vecAngle(toList(args[0]), toList(args[1])), ctx.angle), im: 0 };
 
         default: throw syntaxError();
       }
@@ -753,11 +934,16 @@
     if (parser.p < parser.tk.length) throw syntaxError();
 
     if (C.isPair(value)) return value;
+    if (isList(value)) return { list: value.list, text: '[' + value.list.map(function (n) {
+      return Number.isInteger(n) ? String(n) : String(+n.toPrecision(10));
+    }).join('  ') + ']' };
+    var extraText = value && value.text;
     if (!C.isC(value)) value = { re: value, im: 0 };
     if (!isFinite(value.re) || isNaN(value.re)) throw mathError();
     if (!isFinite(value.im) || isNaN(value.im)) throw mathError();
 
     value = C.clean(value);
+    if (extraText) value.text = extraText;
     if (!ctx.complex && Math.abs(value.im) > 1e-12) throw mathError();
     return value;
   }
@@ -1240,7 +1426,8 @@
     var abs = Math.abs(x);
 
     if (mode === 'sci') {
-      var e = x.toExponential(9);
+      var sd = o.sciDigits || 10;
+      var e = x.toExponential(Math.max(1, Math.min(10, sd - 1)));
       var parts = e.split('e');
       return trimZeros(parts[0]) + '×10' + superscript(parseInt(parts[1], 10));
     }
@@ -1249,7 +1436,7 @@
       if (x === 0) return '0';
       var exp3 = Math.floor(Math.log10(abs) / 3) * 3;
       var mant = x / Math.pow(10, exp3);
-      return trimZeros(mant.toPrecision(10)) + '×10' + superscript(exp3);
+      return trimZeros(mant.toPrecision(o.sciDigits || 10)) + '×10' + superscript(exp3);
     }
 
     if (mode === 'frac') {

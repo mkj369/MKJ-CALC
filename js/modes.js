@@ -1290,7 +1290,7 @@
     render: function (root, app) {
       var p = panel(root);
       head(p, 'Verify', 'Compare two expressions');
-      var left = input({ placeholder: 'e.g. 2+3', value: '2+3' });
+      var left = input({ placeholder: 'left side, e.g. 2+3', value: '2+3' });
       var right = input({ placeholder: 'e.g. 5', value: '5' });
       var tol = select([['0', 'exact (1e-12)'], ['0.001', '1e-3'], ['0.01', '1e-2']], '0');
       var out = outBox(p);
@@ -1376,6 +1376,8 @@
     render: function (root, app) {
       var p = panel(root);
       head(p, 'Constants', 'Tap a constant to copy its value');
+      var query = input({ placeholder: 'Search a constant…', value: '' });
+      p.appendChild(query);
       var list = [
         ['c', 'speed of light', '299 792 458 m/s'],
         ['g', 'standard gravity', '9.80665 m/s²'],
@@ -1397,17 +1399,32 @@
         ['atm', 'standard atmosphere', '101 325 Pa']
       ];
       var grid = el('div', 'const-grid');
-      list.forEach(function (c) {
-        var b = el('button', 'const-item');
-        b.type = 'button';
-        b.innerHTML = '<b>' + c[0] + '</b><span>' + c[1] + '</span><small>' + c[2] + '</small>';
-        b.addEventListener('click', function () {
-          app.insertInto(String(E.PHYS[c[0]]));
-          app.toast(c[0] + ' inserted');
-        });
-        grid.appendChild(b);
-      });
       p.appendChild(grid);
+
+      function draw() {
+        var q = String(query.value || '').trim().toLowerCase();
+        grid.innerHTML = '';
+        var shown = 0;
+        list.forEach(function (c) {
+          var hay = (c[0] + ' ' + c[1] + ' ' + c[2]).toLowerCase();
+          if (q && hay.indexOf(q) < 0) return;
+          shown++;
+          var b = el('button', 'const-item');
+          b.type = 'button';
+          b.innerHTML = '<b>' + c[0] + '</b><span>' + c[1] + '</span><small>' + c[2] + '</small>';
+          b.addEventListener('click', function () {
+            /* insert the numeric value, not the symbol: the value is what a
+               calculator is allowed to promise. */
+            var val = E.PHYS[c[0]];
+            app.insertInto(String(val));
+            app.toast(c[0] + ' = ' + val);
+          });
+          grid.appendChild(b);
+        });
+        if (!shown) grid.innerHTML = '<p class="hint">No constant matches that search.</p>';
+      }
+      query.addEventListener('input', draw);
+      draw();
       root.appendChild(p);
     }
   };
