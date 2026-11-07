@@ -324,19 +324,24 @@
   window.addEventListener('orientationchange', fitSoon);
 
   function buildPad() {
-    var lay = LAY[S.model];
+    var lay = LAY[S.model] || LAY[LAY.order[0]];
+    if (!lay) return;
+    S.model = lay.id;
     var pad = $('pad');
     pad.innerHTML = '';
     pad.dataset.shape = lay.shape;
 
-    if (lay.shape === 'cw' && lay.controls) {
+    /* layout objects are either a flat list (CW) or rows of {keys:[...]} */
+    var flatControls = !!lay.controls && lay.controls.length && !lay.controls[0].keys;
+
+    if (flatControls) {
       /* three fixed control rows + the tall scroll rocker on the right */
       var block = el('div', 'ctlblock');
       block.style.gridTemplateColumns = 'repeat(' + lay.cols + ', 1fr)';
       lay.controls.forEach(function (k) {
         var b = keyEl(k);
-        b.style.gridRow = k.gr;
-        b.style.gridColumn = k.gc;
+        if (k.gr) b.style.gridRow = k.gr;
+        if (k.gc) b.style.gridColumn = k.gc;
         block.appendChild(b);
       });
       if (lay.rocker) {
@@ -1106,13 +1111,28 @@
   /* ---------------- boot ---------------- */
   function boot() {
     load();
+    /* keep the toast inside the device shell, not floating under it */
+    var t = $('toast'), dev = $('device');
+    if (t && dev && t.parentNode !== dev) dev.appendChild(t);
     document.body.dataset.model = S.model;
     document.body.dataset.theme = S.theme;
-    buildPad();
-    renderHome();
-    wire();
-    S.home = !!LAY[S.model].home;
-    paint();
+    try {
+      buildPad();
+      renderHome();
+      wire();
+      S.home = !!LAY[S.model].home;
+      paint();
+    } catch (err) {
+      /* never leave a dead, keyless device on screen */
+      if (window.console) console.error('MKJ CALC boot:', err);
+      S.model = 'cw'; S.mode = 'calc'; S.home = false;
+      try {
+        buildPad(); renderHome(); wire(); paint();
+      } catch (e2) {
+        var pad = $('pad');
+        if (pad) pad.innerHTML = '<div class="boot-err">Reload the page</div>';
+      }
+    }
   }
 
   window.MKJApp = { state: S, press: press, openMode: openMode, equals: equals };

@@ -218,6 +218,7 @@ body {
 .ctlrow .key.nav .sh, .ctlrow .key.ok .sh { display: none; }
 .ctlrow .key.nav .lab, .ctlrow .key.ok .lab { color: #aab3bc; }
 .gapkey { display: block; }
+.boot-err { grid-column: 1 / -1; text-align: center; color: #ff9a92; font-size: 12px; padding: 24px 0; }
 
 .key {
   position: relative;
@@ -424,7 +425,9 @@ body[data-shape="classic"] .key { border-radius: 5px; }
 }
 
 .toast {
-  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 90;
+  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 90;
+  opacity: .93;
+  pointer-events: none;
   max-width: 88vw; text-align: center; background: rgba(20,23,27,.97);
   border: 1px solid var(--line); color: var(--ink); font-size: 11px;
   padding: 7px 13px; border-radius: 999px; box-shadow: 0 8px 20px rgba(0,0,0,.55);
