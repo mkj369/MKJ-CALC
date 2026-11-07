@@ -7,8 +7,9 @@ Everything is branded **MKJ CALC**; no third-party brand names appear in the UI.
 ## Flow
 
 1. **Pick a model** — 991 ES Plus / 991 EX Plus / 991 CW.
-2. **Pick a mode** — Calculate, Complex, Statistics, Matrix, Vector, Equation,
-   Base-N, Ratio, Table, Solve, Verify, Constants.
+2. **Pick a mode** — 16 modes: Calculate, Complex, Statistics, Distribution,
+   Matrix, Vector, Equation, Inequality, Base-N, Ratio, Table, Spreadsheet,
+   Solve, Verify, Math Box, Constants.
 3. **Calculate** — the keypad is that model's own layout: its key order, its SHIFT
    (yellow) and ALPHA (red) functions, its plate text and screen tint.
 
@@ -16,9 +17,13 @@ Everything is branded **MKJ CALC**; no third-party brand names appear in the UI.
 
 | Model | Personality | Key traits |
 |---|---|---|
-| **991 ES Plus** | classic pad | MODE/CALC/SOLVE row, ∫dx, Σ, M+/STO, DEL/AC on the number block |
-| **991 EX Plus** | class pad | menu row, x⁻¹, ⊿x10ˣ, 4-column layout with operators grouped |
-| **991 CW** | flat pad | round dual-purpose keys, HOME/SETTINGS/FORMAT/TOOLS/VARIABLE row |
+| **991 ES Plus** | classic pad | CALC / SOLVE / ∫dx row, ∫ Σ M+ STO, rectangular keys |
+| **991 EX Plus** | ClassWiz pad | S⇔D, x⁻¹, 4 function rows + number block, MENU key |
+| **991 CW** | flat pad | circular function keys, HOME / SETTINGS / FORMAT / CATALOG / TOOLS / VARIABLE |
+
+Every model renders a real device frame: brushed-plastic body with screws, solar cell
+strip, 4-gradation LCD, round ON/MENU keys and a genuine navigation pad
+(▲ ◀ ▶ ▼ around a centre key).
 
 Each model carries its own `keys[]` table in `js/layouts.js`, including per-key
 SHIFT (`s` / `sv`) and ALPHA (`a` / `av`) bindings.
@@ -27,13 +32,17 @@ SHIFT (`s` / `sv`) and ALPHA (`a` / `av`) bindings.
 
 - **Calculate** — arithmetic, functions, Ans, M+, STO/RCL, CALC (with variable prompt)
 - **Complex** — a+bi arithmetic, i, ∠, Conjg/Arg/Re/Im, rectangular ⇄ polar
-- **Statistics** — 1-var and 2-var data, mean/σ/s/Q1/Q3, linear & quadratic regression, normal distribution (P, Q, between, inverse)
+- **Statistics** — 1-var and 2-var data, mean/σ/s/Q1/Q3, linear & quadratic regression
+- **Distribution** — Normal (P, Q, between, inverse), Binomial (P, Q), Poisson (P, Q)
 - **Matrix** — 3 stored matrices (A/B/C), 1×1 … 4×4, det, inverse, transpose, trace, A±B, A×B, kA, solve A·X=B
 - **Vector** — 3-D a, b: sum, difference, dot, cross, magnitude, angle, unit vector
-- **Equation** — quadratic and cubic roots (real and complex, Cardano)
+- **Equation** — polynomial roots degree 2–4 (Durand–Kerner, complex safe) + simultaneous 2–4 unknowns
+- **Inequality** — 2nd/3rd/4th degree inequalities → solution intervals
 - **Base-N** — DEC/HEX/BIN/OCT conversion with AND/OR/XOR/NOR and per-base digit locking
 - **Ratio** — solve a : b = c : d for the missing term, with fraction form
 - **Table** — f(x) and optional g(x) tables with start/end/step
+- **Spreadsheet** — 5 × 8 cell grid with `=A1+B1`, `=SUM(A1:A3)`, `=AVERAGE/MAX/MIN/COUNT(…)`
+- **Math Box** — dice roll (2–20 sides), coin toss probability, random integers
 - **Solve** — numeric root of f(x) = 0 (Newton + bisection fallback), accepts `lhs=rhs`
 - **Verify** — compares two expressions and reports TRUE/FALSE
 - **Constants** — 18 physical constants, tap to insert

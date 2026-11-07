@@ -862,11 +862,16 @@
     },
     inv: function (A) {
       var n = A.length;
+      if (A.some(function (row) { return row.length !== n; })) {
+        throw new CalcError('Math ERROR');
+      }
       var det = Matrix.det(A);
       if (Math.abs(det) < 1e-14) throw new CalcError('Math ERROR');
-      var out = [];
+
+      /* cofactor matrix */
+      var cof = [];
       for (var i = 0; i < n; i++) {
-        out[i] = [];
+        cof[i] = [];
         for (var j = 0; j < n; j++) {
           var minor = [];
           for (var r = 0; r < n; r++) {
@@ -875,7 +880,17 @@
             for (var c = 0; c < n; c++) if (c !== j) row.push(A[r][c]);
             minor.push(row);
           }
-          out[i][j] = ((i + j) % 2 ? -1 : 1) * Matrix.det(minor) / det;
+          var m = (n === 1) ? 1 : Matrix.det(minor);
+          cof[i][j] = ((i + j) % 2 ? -1 : 1) * m;
+        }
+      }
+
+      /* inverse = adjugate / det  (adjugate = transpose of cofactors) */
+      var out = [];
+      for (var r2 = 0; r2 < n; r2++) {
+        out[r2] = [];
+        for (var c2 = 0; c2 < n; c2++) {
+          out[r2][c2] = cof[c2][r2] / det;
         }
       }
       return out;
@@ -1327,5 +1342,270 @@
   };
 
   global.MKJEngine = API;
+
+})(typeof window !== 'undefined' ? window : this);
+
+/* ============================================================
+   13. polynomial roots (any degree, complex) — Durand–Kerner
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var API = global.MKJEngine || (typeof window !== 'undefined' ? window.MKJEngine : null);
+  if (!API) return;
+  var C = API.C;
+
+  /** coeffs high→low: [a_n, ..., a_0] */
+  function polyRoots(coeffs) {
+    var a = coeffs.slice();
+    while (a.length > 1 && Math.abs(a[0]) < 1e-14) a.shift();
+    var n = a.length - 1;
+    if (n < 1) throw new API.CalcError('Math ERROR');
+    var lead = a[0];
+    var c = a.map(function (v) { return v / lead; });
+
+    if (n === 1) return [{ re: -c[1], im: 0 }];
+
+    function polyEval(z) {
+      var r = { re: c[0], im: 0 };
+      for (var i = 1; i <= n; i++) {
+        r = C.add(C.mul(r, z), { re: c[i], im: 0 });
+      }
+      return r;
+    }
+
+    var radius = 1 + Math.max.apply(null, c.slice(1).map(Math.abs));
+    var roots = [];
+    for (var k = 0; k < n; k++) {
+      var ang = 2 * Math.PI * k / n + 0.35;
+      roots.push({
+        re: 0.4 * radius * Math.cos(ang) + 0.05,
+        im: 0.4 * radius * Math.sin(ang) + 0.05
+      });
+    }
+
+    for (var iter = 0; iter < 800; iter++) {
+      var maxDelta = 0;
+      for (var i = 0; i < n; i++) {
+        var zi = roots[i];
+        var num = polyEval(zi);
+        var den = { re: 1, im: 0 };
+        for (var j = 0; j < n; j++) {
+          if (i === j) continue;
+          den = C.mul(den, C.sub(zi, roots[j]));
+        }
+        if (C.abs(den) < 1e-15) continue;
+        var delta = C.div(num, den);
+        var mag = C.abs(delta);
+        if (mag > maxDelta) maxDelta = mag;
+        roots[i] = C.clean(C.sub(zi, delta));
+      }
+      if (maxDelta < 1e-14) break;
+    }
+
+    // sort: real roots ascending first, then complex by real part
+    roots = roots.map(function (z) { return C.clean(z); });
+    roots.sort(function (p, q) {
+      var pr = Math.abs(p.im) < 1e-9 ? 0 : 1;
+      var qr = Math.abs(q.im) < 1e-9 ? 0 : 1;
+      if (pr !== qr) return pr - qr;
+      if (pr === 0) return p.re - q.re;
+      return p.re - q.re || p.im - q.im;
+    });
+    return roots;
+  }
+
+  /* ============================================================
+     14. inequalities:  ax^n + ... (> | >= | < | <=) 0
+     returns interval list [{a,b,inclusive}]  plus a text form
+     ============================================================ */
+  function solveInequality(coeffs, rel) {
+    var roots = polyRoots(coeffs).filter(function (z) { return Math.abs(z.im) < 1e-9; })
+      .map(function (z) { return z.re; });
+    roots.sort(function (a, b) { return a - b; });
+    // de-duplicate
+    roots = roots.filter(function (v, i) { return i === 0 || Math.abs(v - roots[i - 1]) > 1e-9; });
+
+    var strict = rel === '>' || rel === '<';
+    var wantPositive = rel === '>' || rel === '≥';
+
+    function ev(x) {
+      var r = 0;
+      for (var i = 0; i < coeffs.length; i++) r = r * x + coeffs[i];
+      return r;
+    }
+
+    /* candidate open intervals between roots (and outside them) */
+    var spans = [];
+    if (!roots.length) {
+      spans.push({ a: -Infinity, b: Infinity });
+    } else {
+      spans.push({ a: -Infinity, b: roots[0] });
+      for (var i = 0; i < roots.length - 1; i++) spans.push({ a: roots[i], b: roots[i + 1] });
+      spans.push({ a: roots[roots.length - 1], b: Infinity });
+    }
+
+    function probe(sp) {
+      if (!isFinite(sp.a) && !isFinite(sp.b)) return 1e6;
+      if (!isFinite(sp.a)) return sp.b - (Math.abs(sp.b) + 1);
+      if (!isFinite(sp.b)) return sp.a + (Math.abs(sp.a) + 1);
+      return (sp.a + sp.b) / 2;
+    }
+
+    var out = [];
+    spans.forEach(function (sp) {
+      var val = ev(probe(sp));
+      var ok = wantPositive ? val > 0 : val < 0;
+      if (!ok) return;
+      out.push({
+        a: sp.a, b: sp.b,
+        openA: strict && isFinite(sp.a),
+        openB: strict && isFinite(sp.b)
+      });
+    });
+
+    /* when non-strict, isolated roots can be solutions too */
+    if (!strict && out.length) {
+      var glued = [];
+      out.forEach(function (iv) {
+        var last = glued[glued.length - 1];
+        if (last && isFinite(last.b) && isFinite(iv.a) && Math.abs(last.b - iv.a) < 1e-12) {
+          last.b = iv.b; last.openB = iv.openB;
+        } else glued.push({ a: iv.a, b: iv.b, openA: iv.openA, openB: iv.openB });
+      });
+      out = glued;
+    }
+    return out;
+  }
+
+  function inequalityText(intervals) {
+    if (!intervals.length) return 'no solution';
+    return intervals.map(function (iv) {
+      var leftInf = !isFinite(iv.a) || iv.a <= -1e5;
+      var rightInf = !isFinite(iv.b) || iv.b >= 1e5;
+      var a = fmtNum(iv.a), b = fmtNum(iv.b);
+      if (leftInf && rightInf) return 'all real numbers';
+      if (leftInf) return 'x ' + (iv.openB ? '<' : '≤') + ' ' + b;
+      if (rightInf) return 'x ' + (iv.openA ? '>' : '≥') + ' ' + a;
+      return a + ' ' + (iv.openA ? '<' : '≤') + ' x ' + (iv.openB ? '<' : '≤') + ' ' + b;
+    }).join('  or  ');
+  }
+  function fmtNum(v) {
+    var r = Math.round(v * 1e10) / 1e10;
+    return String(r);
+  }
+
+  /* ============================================================
+     15. discrete distributions
+     ============================================================ */
+  function logFact(n) {
+    var r = 0;
+    for (var i = 2; i <= n; i++) r += Math.log(i);
+    return r;
+  }
+  var Dist = {
+    binomialPdf: function (k, n, p) {
+      if (k < 0 || k > n) return 0;
+      var lc = logFact(n) - logFact(k) - logFact(n - k);
+      return Math.exp(lc + k * Math.log(p || 1e-300) + (n - k) * Math.log(1 - p || 1e-300));
+    },
+    binomialCdf: function (k, n, p) {
+      var s = 0;
+      for (var i = 0; i <= Math.floor(k); i++) s += Dist.binomialPdf(i, n, p);
+      return s;
+    },
+    poissonPdf: function (k, lambda) {
+      if (k < 0) return 0;
+      return Math.exp(-lambda + k * Math.log(lambda || 1e-300) - logFact(k));
+    },
+    poissonCdf: function (k, lambda) {
+      var s = 0;
+      for (var i = 0; i <= Math.floor(k); i++) s += Dist.poissonPdf(i, lambda);
+      return s;
+    },
+    invNormal: function (p) { return API.Stat.normalInv(p); }
+  };
+
+  /* ============================================================
+     16. spreadsheet helpers
+     ============================================================ */
+  var Sheet = {
+    colIndex: function (letter) { return letter.toUpperCase().charCodeAt(0) - 65; },
+    refName: function (col, row) { return String.fromCharCode(65 + col) + (row + 1); },
+    /** build value grid from raw strings  */
+    evaluate: function (raw, rows, cols, ctx) {
+      var values = [];
+      var computing = {};
+      for (var r = 0; r < rows; r++) { values[r] = []; }
+
+      function cellValue(r, c) {
+        if (values[r] && values[r][c] !== undefined) return values[r][c];
+        var key = r + ':' + c;
+        if (computing[key]) return 0;
+        computing[key] = true;
+        var text = (raw[r] && raw[r][c] !== undefined) ? String(raw[r][c]).trim() : '';
+        var out = 0;
+        if (text === '') out = 0;
+        else if (text[0] === '=') {
+          var expr = text.slice(1);
+
+          /* range functions: SUM(A1:A3), AVERAGE, MAX, MIN, COUNT */
+          expr = expr.replace(/(SUM|AVERAGE|AVG|MAX|MIN|COUNT)\(([A-Z])(\d+):([A-Z])(\d+)\)/gi, function (m, fn, c1, r1, c2, r2) {
+            var colA = c1.charCodeAt(0) - 65, colB = c2.charCodeAt(0) - 65;
+            var rowA = parseInt(r1, 10) - 1, rowB = parseInt(r2, 10) - 1;
+            var list = [];
+            for (var rr = Math.min(rowA, rowB); rr <= Math.max(rowA, rowB); rr++) {
+              for (var cc = Math.min(colA, colB); cc <= Math.max(colA, colB); cc++) {
+                if (rr >= 0 && rr < rows && cc >= 0 && cc < cols) {
+                  var v2 = cellValue(rr, cc);
+                  if (typeof v2 === 'number') list.push(v2);
+                }
+              }
+            }
+            var name = fn.toUpperCase();
+            var res = 0;
+            if (name === 'SUM') res = list.reduce(function (a, b) { return a + b; }, 0);
+            else if (name === 'COUNT') res = list.length;
+            else if (name === 'MAX') res = list.length ? Math.max.apply(null, list) : 0;
+            else if (name === 'MIN') res = list.length ? Math.min.apply(null, list) : 0;
+            else res = list.length ? list.reduce(function (a, b) { return a + b; }, 0) / list.length : 0;
+            return '(' + res + ')';
+          });
+
+          expr = expr.replace(/([A-Z])(\d+)/g, function (m, L, N) {
+            var cc = L.charCodeAt(0) - 65, rr = parseInt(N, 10) - 1;
+            if (cc < 0 || cc >= cols || rr < 0 || rr >= rows) return '0';
+            return '(' + cellValue(rr, cc) + ')';
+          });
+          try {
+            var v = API.evaluate(expr, ctx || { angle: 'deg', vars: {} });
+            out = API.C.isC(v) ? v.re : v;
+          } catch (e) { out = 'ERROR'; }
+        } else {
+          var num = Number(text);
+          if (!isNaN(num)) out = num;
+          else {
+            try {
+              var vv = API.evaluate(text, ctx || { angle: 'deg', vars: {} });
+              out = API.C.isC(vv) ? vv.re : vv;
+            } catch (e2) { out = 'ERROR'; }
+          }
+        }
+        computing[key] = false;
+        values[r][c] = out;
+        return out;
+      }
+
+      for (var r2 = 0; r2 < rows; r2++) {
+        for (var c2 = 0; c2 < cols; c2++) cellValue(r2, c2);
+      }
+      return values;
+    }
+  };
+
+  API.polyRoots = polyRoots;
+  API.solveInequality = solveInequality;
+  API.inequalityText = inequalityText;
+  API.Dist = Dist;
+  API.Sheet = Sheet;
 
 })(typeof window !== 'undefined' ? window : this);

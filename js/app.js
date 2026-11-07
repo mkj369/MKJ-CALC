@@ -154,21 +154,24 @@
   var MODEL_META = {
     esplus: {
       name: '991 ES Plus',
-      desc: 'The classic scientific layout with a natural display.',
-      tags: ['Classic', 'Natural display', '12 modes'],
-      accent: '#ff9b3d', screen: ['#c9d8c4', '#a9bba4']
+      desc: 'Classic pad · natural display · 16 modes',
+      tags: ['Classic pad', '∫ / d/dx', 'STO · RCL'],
+      accent: '#ff9b3d', screen: ['#c9d8c4', '#a9bba4'],
+      shape: 'classic', rows: 4, round: false
     },
     explus: {
       name: '991 EX Plus',
-      desc: 'Class-style pad, extra function rows and menu keys.',
-      tags: ['Class pad', 'Menu keys', '12 modes'],
-      accent: '#47b3ff', screen: ['#cfe0e6', '#b3c8d0']
+      desc: 'ClassWiz pad · menu keys · spreadsheet',
+      tags: ['ClassWiz', 'Spreadsheet', '4×4 matrix'],
+      accent: '#47b3ff', screen: ['#cfe0e6', '#b3c8d0'],
+      shape: 'classwiz', rows: 4, round: false
     },
     cw: {
       name: '991 CW',
-      desc: 'Flat pad, round HOME key and a cleaner keyboard.',
-      tags: ['Flat pad', 'HOME key', '12 modes'],
-      accent: '#7de2c3', screen: ['#c4d3d0', '#a9bbb7']
+      desc: 'Flat pad · circular keys · HOME menu',
+      tags: ['Circular keys', 'Math Box', '4-gradation'],
+      accent: '#7de2c3', screen: ['#c4d3d0', '#a9bbb7'],
+      shape: 'cw', rows: 4, round: true
     }
   };
 
@@ -185,18 +188,16 @@
       card.style.setProperty('--mc-screen2', meta.screen[1]);
 
       var prev = document.createElement('div');
-      prev.className = 'mc-preview';
-      var scr = document.createElement('div');
-      scr.className = 'mc-screen';
-      var keys = document.createElement('div');
-      keys.className = 'mc-keys';
-      for (var i = 0; i < 12; i++) {
-        var k = document.createElement('i');
-        if (i === 11 || i === 3) k.className = 'hot';
-        keys.appendChild(k);
-      }
-      prev.appendChild(scr);
-      prev.appendChild(keys);
+      prev.className = 'mc-preview shape-' + meta.shape;
+      prev.innerHTML =
+        '<div class="mc-brand">MKJ</div>' +
+        '<div class="mc-screen"></div>' +
+        '<div class="mc-pad">' +
+          '<span class="mc-nav"></span>' +
+        '</div>' +
+        '<div class="mc-keys ' + (meta.round ? 'round' : '') + '">' +
+          new Array(16).fill('<i></i>').join('') +
+        '</div>';
 
       var body = document.createElement('div');
       body.className = 'mc-body';
@@ -301,58 +302,125 @@
     return wrap;
   }
 
-  function renderKeypad() {
-    renderKeypadInto($('keypad'));
+  /* build one key button */
+  function makeKey(key) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'key ' + (key.c || '');
+    if (key.shape) b.classList.add('shape-' + key.shape);
+    if (key.span > 1) b.classList.add(key.span === 2 ? 'wide' : 'wide3');
+
+    if (key.s) {
+      var sh = document.createElement('span');
+      sh.className = 'k-shift';
+      sh.textContent = key.s;
+      b.appendChild(sh);
+    }
+    if (key.a) {
+      var al = document.createElement('span');
+      al.className = 'k-alpha';
+      al.textContent = key.a;
+      b.appendChild(al);
+    }
+    var lab = document.createElement('span');
+    lab.className = 'k-label ' + (key.sm || '');
+    lab.textContent = key.l;
+    b.appendChild(lab);
+
+    b.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      pressKey(key);
+      b.classList.add('flashkey');
+      setTimeout(function () { b.classList.remove('flashkey'); }, 260);
+    });
+    return b;
   }
 
-  function renderKeypadInto(pad) {
-    var layout = LAY[state.model];
-    pad.innerHTML = '';
-    var isPrimary = pad.id === 'keypad';
-    if (isPrimary) pad.classList.toggle('cols-6', layout.cols === 6);
-
-    layout.keys.forEach(function (key) {
+  /* navigation pad: ▲ ◀ ▶ ▼ around a round centre */
+  function makeNavPad() {
+    var pad = document.createElement('div');
+    pad.className = 'navpad';
+    var spec = [
+      ['', 'nav-spacer nav-a'], ['▲', 'nav-up'], ['', 'nav-spacer nav-b'],
+      ['◀', 'nav-left'], ['', 'nav-centre'], ['▶', 'nav-right'],
+      ['', 'nav-spacer nav-c'], ['▼', 'nav-down'], ['', 'nav-spacer nav-d']
+    ];
+    spec.forEach(function (item) {
+      if (item[0] === '') {
+        var sp = document.createElement('span');
+        sp.className = item[1];
+        pad.appendChild(sp);
+        return;
+      }
       var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'key ' + (key.c || '');
-      if (key.span > 1) b.classList.add('wide');
-
-      var shiftLabel = key.s && state.shift ? key.s : null;
-      var alphaLabel = key.a;
-
-      if (key.s) {
-        var sh = document.createElement('span');
-        sh.className = 'k-shift';
-        sh.textContent = key.s;
-        b.appendChild(sh);
-      }
-      if (key.a) {
-        var al = document.createElement('span');
-        al.className = 'k-alpha';
-        al.textContent = key.a;
-        b.appendChild(al);
-      }
-      var lab = document.createElement('span');
-      lab.className = 'k-label ' + (key.sm || '');
-      lab.textContent = key.l;
-      b.appendChild(lab);
-
-      b.addEventListener('click', function (ev) {
-        ev.preventDefault();
-        pressKey(key);
+      b.className = 'nav-key ' + item[1];
+      b.textContent = item[0];
+      var cmd = item[1] === 'nav-up' ? 'up' : item[1] === 'nav-down' ? 'down'
+              : item[1] === 'nav-left' ? 'left' : 'right';
+      b.addEventListener('click', function () {
+        click(640); haptic(6);
+        runCommand(cmd);
       });
       pad.appendChild(b);
     });
-    document.body.classList.toggle('shift-on', state.shift);
-    document.body.classList.toggle('alpha-on', state.alpha);
+    var centre = pad.querySelector('.nav-centre');
+    centre.addEventListener('click', function () { click(700); evaluateCurrent(); });
+    return pad;
   }
 
-  /* press a key, applying SHIFT / ALPHA */
+  function renderKeypad() {
+    renderKeypadInto($('keypad'), true);
+  }
+
+  function renderKeypadInto(pad, withDevice) {
+    var layout = LAY[state.model];
+    pad.innerHTML = '';
+    if (pad.id === 'keypad') pad.classList.toggle('cols-6', layout.cols === 6);
+
+    /* ---- upper cluster: SHIFT / ALPHA · nav pad · MENU · ON ---- */
+    if (withDevice) {
+      var cluster = document.createElement('div');
+      cluster.className = 'key-cluster';
+
+      var left = document.createElement('div');
+      left.className = 'cluster-left';
+      left.appendChild(makeKey(layout.top[0]));
+      left.appendChild(makeKey(layout.top[1]));
+      cluster.appendChild(left);
+
+      cluster.appendChild(makeNavPad());
+
+      var right = document.createElement('div');
+      right.className = 'cluster-right';
+      var menuKey = layout.top[3];
+      var onKey = layout.top[4];
+      menuKey.shape = menuKey.shape || 'round';
+      onKey.shape = onKey.shape || 'round';
+      right.appendChild(makeKey(menuKey));
+      right.appendChild(makeKey(onKey));
+      cluster.appendChild(right);
+
+      pad.appendChild(cluster);
+    }
+
+    /* ---- main rows ---- */
+    layout.rows.forEach(function (row) {
+      row.forEach(function (key) {
+        pad.appendChild(makeKey(key));
+      });
+    });
+
+    document.body.classList.toggle('shift-on', state.shift);
+    document.body.classList.toggle('alpha-on', state.alpha);
+    document.body.dataset.shape = layout.shape || 'classic';
+  }
+
+  /* press a key, honouring SHIFT / ALPHA modifiers */
   function pressKey(key) {
     click(key.act === 'cmd' ? 620 : 840);
     haptic(8);
 
-    /* modifiers first */
     if (key.act === 'cmd' && key.v === 'shift') {
       state.shift = !state.shift;
       state.alpha = false;
@@ -365,15 +433,13 @@
       renderScreen(); renderKeypad();
       return;
     }
-
-    /* SHIFT / ALPHA alternative */
     if (state.shift && key.s) {
       state.shift = false;
       if (key.sv) {
         if (isCmd(key.sv)) runCommand(key.sv);
         else insert(key.sv);
       } else {
-        toast(key.s + ' is a label only');
+        toast(key.s + ' has no function on this model');
       }
       renderKeypad();
       return;
@@ -384,7 +450,6 @@
       renderKeypad();
       return;
     }
-
     if (state.shift || state.alpha) {
       state.shift = false;
       state.alpha = false;
@@ -445,6 +510,7 @@
     state.expr = '';
     state.caret = 0;
     state.result = '0';
+    state.altText = '';
     state.isError = false;
     state.rawValue = null;
     state.sdStage = 0;
@@ -460,7 +526,8 @@
      ------------------------------------------------------------ */
   function renderScreen() {
     var layout = LAY[state.model];
-    $('plateModel').textContent = layout.plate;
+    $('plateModel').textContent = layout.model || layout.plate;
+    $('plateSeries').textContent = layout.series || '';
     $('plateSub').textContent = layout.sub;
     $('footModel').textContent = layout.foot;
     $('calcSubtitle').textContent = layout.plate;
@@ -483,6 +550,8 @@
 
     var res = $('result');
     res.textContent = state.result;
+    var res2 = $('result2');
+    if (res2) res2.textContent = state.altText || '';
     res.className = 'result' +
       (state.isError ? ' error' : '') +
       (state.result.length > 22 ? ' tiny' : state.result.length > 13 ? ' small' : '');
@@ -578,6 +647,18 @@
           state.sdStage = 1;
         }
       }
+      /* alternative form shown on the second line (textbook feel) */
+      state.altText = '';
+      if (!E.C.isPair(state.rawValue)) {
+        var alt = E.C.to(state.rawValue);
+        if (Math.abs(alt.im) < 1e-12) {
+          var pf = E.piFraction(alt.re);
+          if (pf && state.result.indexOf(pf) < 0) state.altText = pf;
+          else if (state._fraction && state.result.indexOf(E.fractionText(state._fraction)) < 0) {
+            state.altText = E.fractionText(state._fraction);
+          }
+        }
+      }
       state.isError = false;
       state.sdStage = 0;
       $('result').classList.remove('flash');
@@ -592,6 +673,7 @@
       renderScreen();
     } catch (err) {
       state.result = (err && err.message) || 'Math ERROR';
+      state.altText = '';
       state.isError = true;
       state.sdStage = 0;
       click(180);
@@ -628,6 +710,7 @@
     if (stages.length === 1) { toast('No alternative form'); return; }
     state.sdStage = (state.sdStage + 1) % stages.length;
     state.result = stages[state.sdStage];
+    state.altText = stages.filter(function (t, i) { return i !== state.sdStage; }).slice(0, 1).join('') || '';
     if (state.sdStage > 0 && fr && state.result === E.fractionText(fr)) state._fraction = fr;
     renderScreen();
   }
@@ -1140,9 +1223,13 @@
 
   window.MKJApp = {
     state: state,
-    press: function (label) {
+    keys: function () {
       var layout = LAY[state.model];
-      var key = layout.keys.filter(function (k) { return k.l === label; })[0];
+      return layout.top.concat.apply(layout.top, layout.rows);
+    },
+    press: function (label) {
+      var all = window.MKJApp.keys();
+      var key = all.filter(function (k) { return k.l === label; })[0];
       if (key) pressKey(key);
       return key;
     },

@@ -71,6 +71,41 @@
     box.innerHTML = html;
     box.classList.toggle('is-error', !!isErr);
   }
+  function attachPad(container, getInputs, app) {
+    var focused = null;
+    function bind() {
+      var list = typeof getInputs === 'function' ? getInputs() : getInputs;
+      focused = list[0] || null;
+      list.forEach(function (inp) {
+        inp.addEventListener('focus', function () { focused = inp; });
+        inp.addEventListener('click', function () { focused = inp; });
+        inp.addEventListener('input', function () { focused = inp; });
+      });
+      return list;
+    }
+    bind();
+    var pad = numPad(function (key) {
+      if (!focused) bind();
+      if (!focused) return;
+      var start = focused.selectionStart !== null ? focused.selectionStart : focused.value.length;
+      var end = focused.selectionEnd !== null ? focused.selectionEnd : start;
+      focused.value = focused.value.slice(0, start) + key + focused.value.slice(end);
+      var pos = start + key.length;
+      focused.setSelectionRange && focused.setSelectionRange(pos, pos);
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+    }, function () {
+      if (!focused) return;
+      focused.value = '';
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+    }, function () {
+      if (!focused) return;
+      focused.value = focused.value.slice(0, -1);
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    container.appendChild(pad);
+    return { pad: pad, rebind: bind };
+  }
+
   function parseNum(s) {
     var v = E.evaluate(String(s || '0').replace(/,/g, ' '), { angle: 'deg', vars: {} });
     if (E.C.isC(v) && Math.abs(v.im) > 1e-12) throw new Error('real only');
@@ -81,6 +116,29 @@
       .split(sep || /[\s,;]+/)
       .filter(function (t) { return t.trim() !== ''; })
       .map(function (t) { return t.trim(); });
+  }
+
+  /* compact 9-key number pad (+ its own insert callback) */
+  function numPad(onKey, onClear, onDel) {
+    var wrap = el('div', 'minipad');
+    ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '(-)'].forEach(function (label) {
+      var b = el('button', 'mp-key', label);
+      b.type = 'button';
+      b.addEventListener('click', function () {
+        onKey(label === '(-)' ? '-' : label);
+      });
+      wrap.appendChild(b);
+    });
+    var row = el('div', 'minipad-actions');
+    var del = el('button', 'mp-key mp-del', 'DEL');
+    del.type = 'button';
+    del.addEventListener('click', onDel);
+    var ac = el('button', 'mp-key mp-ac', 'AC');
+    ac.type = 'button';
+    ac.addEventListener('click', onClear);
+    row.appendChild(del); row.appendChild(ac);
+    wrap.appendChild(row);
+    return wrap;
   }
 
   /* ============================================================
@@ -676,52 +734,68 @@
      ============================================================ */
   var EquationMode = {
     id: 'equation', name: 'Equation', icon: 'x²', color: '#fb923c',
-    desc: 'Quadratic, cubic, simultaneous',
+    desc: 'Simultaneous, quadratic → quartic',
     models: ['esplus', 'explus', 'cw'],
     render: function (root, app) {
       var p = panel(root);
-      head(p, 'Polynomial', 'Quadratic and cubic roots');
-      var deg = select([['2', 'ax² + bx + c = 0'], ['3', 'ax³ + bx² + cx + d = 0']], '2');
+      head(p, 'Polynomial', 'Roots of a polynomial equation');
+      var deg = select([['2', 'ax² + bx + c = 0'], ['3', 'ax³ + bx² + cx + d = 0'],
+                        ['4', 'ax⁴ + bx³ + cx² + dx + e = 0']], app.state.eqDegree || '2');
       var box = el('div', 'coef-grid');
-      var vals = { a: '1', b: '0', c: '-4', d: '0' };
+      var vals = app.state.eqCoefs || { a: '1', b: '0', c: '-4', d: '0', e: '0' };
       var out = outBox(p);
+      var labels = ['a', 'b', 'c', 'd', 'e'];
+
       function build() {
         box.innerHTML = '';
-        var list = deg.value === '2' ? ['a', 'b', 'c'] : ['a', 'b', 'c', 'd'];
-        list.forEach(function (n) {
-          var i = input({ value: vals[n] });
-          i.addEventListener('input', function () { vals[n] = i.value; run(); });
-          box.appendChild(field(n, i));
-        });
+        var n = parseInt(deg.value, 10);
+        for (var i = 0; i < n + 1; i++) {
+          (function (name) {
+            var inp = input({ value: vals[name] !== undefined ? vals[name] : (name === 'a' ? '1' : '0') });
+            inp.addEventListener('input', function () {
+              vals[name] = inp.value;
+              app.state.eqCoefs = vals;
+              run();
+            });
+            box.appendChild(field(name, inp));
+          })(labels[i]);
+        }
       }
       function run() {
         try {
-          var a = parseNum(vals.a), b = parseNum(vals.b), c = parseNum(vals.c), d = parseNum(vals.d);
-          if (Math.abs(a) < 1e-14) throw new Error('a ≠ 0 required');
-          var roots = deg.value === '3' ? cubicRoots(a, b, c, d) : (function () {
-            var disc = b * b - 4 * a * c;
-            if (disc >= 0) {
-              return [E.C.make((-b + Math.sqrt(disc)) / (2 * a), 0), E.C.make((-b - Math.sqrt(disc)) / (2 * a), 0)];
-            }
-            var re = -b / (2 * a), im = Math.sqrt(-disc) / (2 * a);
-            return [E.C.make(re, im), E.C.make(re, -im)];
-          })();
-          setOut(out, roots.map(function (z, i) {
-            return '<div>x' + (i + 1) + ' = <b>' + E.formatValue(E.C.clean(z), { format: 'norm', complex: true }) + '</b></div>';
-          }).join(''));
+          var n = parseInt(deg.value, 10);
+          var coeffs = [];
+          for (var i = 0; i <= n; i++) coeffs.push(parseNum(vals[labels[i]] || '0'));
+          if (Math.abs(coeffs[0]) < 1e-14) throw new Error('a cannot be 0');
+          var roots = E.polyRoots(coeffs);
+          var html = roots.map(function (z, i) {
+            var c = E.C.clean(z);
+            return '<div class="root-row"><span>x' + (i + 1) + ' =</span><b>' +
+              E.formatValue(c, { format: 'norm', complex: true }) + '</b></div>';
+          }).join('');
+          setOut(out, html);
+          app.state.eqDegree = deg.value;
         } catch (e) { setOut(out, e.message, true); }
       }
       deg.addEventListener('change', function () { build(); run(); });
-      p.appendChild(field('Degree', deg));
+      p.appendChild(field('Type', deg));
       p.appendChild(box);
       p.appendChild(out);
       root.appendChild(p);
+
+      /* number pad that types into whichever coefficient box was touched */
+      var padHost = el('div');
+      p.appendChild(padHost);
+      var padApi = attachPad(padHost, function () {
+        return Array.prototype.slice.call(box.querySelectorAll('input'));
+      }, app);
+      deg.addEventListener('change', function () { setTimeout(padApi.rebind, 0); });
       build(); run();
 
       /* simultaneous linear equations */
       var sp = panel(root);
-      head(sp, 'Simultaneous', 'n unknowns, n equations');
-      var nSel = select([['2', '2 unknowns'], ['3', '3 unknowns'], ['4', '4 unknowns']], '2');
+      head(sp, 'Simultaneous', 'a₁x + b₁y + … = d₁');
+      var nSel = select([['2', '2 unknowns'], ['3', '3 unknowns'], ['4', '4 unknowns']], app.state.simSize || '2');
       var host = el('div', 'sim-host');
       var sout = outBox(sp);
       var grid = {};
@@ -732,13 +806,13 @@
         for (var i = 0; i < n; i++) {
           var line = el('div', 'sim-line');
           for (var j = 0; j < n + 1; j++) {
-            var label = j < n ? String.fromCharCode(97 + j) : '=';
-            if (j > 0 && j < n) line.appendChild(el('span', 'sim-plus', '+'));
             if (j === n) line.appendChild(el('span', 'sim-plus', '='));
+            else if (j > 0) line.appendChild(el('span', 'sim-plus', '+'));
             var inp = input({ value: '0', cls: 'sim-cell' });
             grid[i + ',' + j] = inp;
             line.appendChild(inp);
           }
+          var span = el('span', 'sim-tag', '(' + (i + 1) + ')');
           host.appendChild(line);
         }
         simRun();
@@ -755,8 +829,10 @@
           var sol = E.Matrix.solveLinear(A, b);
           if (!sol) throw new Error('No unique solution');
           setOut(sout, sol.map(function (v, i) {
-            return '<div>x' + String.fromCharCode(97 + i) + ' = <b>' + E.formatValue(v, { format: 'norm' }) + '</b></div>';
+            return '<div class="root-row"><span>x' + (i + 1) + ' =</span><b>' +
+              E.formatValue(v, { format: 'norm' }) + '</b></div>';
           }).join(''));
+          app.state.simSize = nSel.value;
         } catch (e) { setOut(sout, e.message, true); }
       }
       host.addEventListener('input', simRun);
@@ -766,6 +842,335 @@
       sp.appendChild(sout);
       root.appendChild(sp);
       buildSim();
+    }
+  };
+
+  /* ============================================================
+     INEQUALITY
+     ============================================================ */
+  var InequalityMode = {
+    id: 'inequality', name: 'Inequality', icon: '≤', color: '#60a5fa',
+    desc: 'Solve ax²+bx+c ≤ 0 etc.',
+    models: ['esplus', 'explus', 'cw'],
+    render: function (root, app) {
+      var p = panel(root);
+      head(p, 'Inequality', 'Solution range for an inequality');
+      var deg = select([['2', '2nd degree'], ['3', '3rd degree'], ['4', '4th degree']], app.state.ineqDegree || '2');
+      var rel = select([['>', '> 0'], ['≥', '≥ 0'], ['<', '< 0'], ['≤', '≤ 0']], app.state.ineqRel || '<');
+      var box = el('div', 'coef-grid');
+      var out = outBox(p);
+      var labels = ['a', 'b', 'c', 'd', 'e'];
+      var vals = app.state.ineqCoefs || { a: '1', b: '0', c: '-4', d: '0', e: '0' };
+
+      function build() {
+        box.innerHTML = '';
+        var n = parseInt(deg.value, 10);
+        for (var i = 0; i < n + 1; i++) {
+          (function (name) {
+            var inp = input({ value: vals[name] !== undefined ? vals[name] : (name === 'a' ? '1' : '0') });
+            inp.addEventListener('input', function () { vals[name] = inp.value; run(); });
+            box.appendChild(field(name, inp));
+          })(labels[i]);
+        }
+      }
+      function run() {
+        try {
+          var n = parseInt(deg.value, 10);
+          var coeffs = [];
+          for (var i = 0; i <= n; i++) coeffs.push(parseNum(vals[labels[i]] || '0'));
+          if (Math.abs(coeffs[0]) < 1e-14) throw new Error('a cannot be 0');
+          var sol = E.solveInequality(coeffs, rel.value);
+          var txt = E.inequalityText(sol);
+          setOut(out, '<b>' + txt + '</b>' +
+            '<div class="out-sub">' + (sol.length ? sol.length + ' interval(s)' : 'empty set') + '</div>');
+          app.state.ineqCoefs = vals; app.state.ineqDegree = deg.value; app.state.ineqRel = rel.value;
+        } catch (e) { setOut(out, e.message, true); }
+      }
+      deg.addEventListener('change', function () { build(); run(); });
+      rel.addEventListener('change', run);
+      p.appendChild(field('Degree', deg));
+      p.appendChild(field('Relation', rel));
+      p.appendChild(box);
+      p.appendChild(out);
+      root.appendChild(p);
+      build(); run();
+    }
+  };
+
+  /* ============================================================
+     DISTRIBUTION (normal / binomial / poisson)
+     ============================================================ */
+  var DistMode = {
+    id: 'dist', name: 'Distribution', icon: 'Φ', color: '#f0abfc',
+    desc: 'Normal, binomial, Poisson',
+    models: ['esplus', 'explus', 'cw'],
+    render: function (root, app) {
+      var p = panel(root);
+      head(p, 'Distribution', 'Probability functions');
+      var kind = select([
+        ['normal', 'Normal distribution'],
+        ['binomial', 'Binomial distribution'],
+        ['poisson', 'Poisson distribution']
+      ], app.state.distKind || 'normal');
+      var fnSel = select([], 'pd');
+      var argsHost = el('div', 'fld-row');
+      var out = outBox(p);
+
+      var ARGS = {
+        normal: [['mu', 'μ mean', '0'], ['sd', 'σ sd', '1'], ['x', 'x / lower', '1'], ['b', 'b upper', '2']],
+        binomial: [['n', 'n trials', '10'], ['p', 'p prob', '0.5'], ['x', 'x value', '3']],
+        poisson: [['lam', 'λ mean', '3'], ['x', 'x value', '2']]
+      };
+
+      var inputs = {};
+
+      function buildFns() {
+        fnSel.innerHTML = '';
+        var opts = kind.value === 'normal'
+          ? [['pd', 'P(x)  probability density'], ['cd', 'Q(x)  cumulative ≤ x'],
+             ['between', 'Q(b) − Q(a)'], ['inv', 'inverse (p → x)']]
+          : kind.value === 'binomial'
+            ? [['pd', 'P(x = k)'], ['cd', 'P(x ≤ k)'], ['between', 'P(a ≤ x ≤ b)']]
+            : [['pd', 'P(x = k)'], ['cd', 'P(x ≤ k)'], ['between', 'P(a ≤ x ≤ b)']];
+        opts.forEach(function (o) {
+          var op = document.createElement('option');
+          op.value = o[0]; op.textContent = o[1];
+          fnSel.appendChild(op);
+        });
+        fnSel.value = 'pd';
+      }
+
+      function buildArgs() {
+        argsHost.innerHTML = '';
+        inputs = {};
+        var list = ARGS[kind.value];
+        list.forEach(function (a) {
+          var inp = input({ value: app.state['dist_' + kind.value + '_' + a[0]] || a[2] });
+          inputs[a[0]] = inp;
+          inp.addEventListener('input', function () {
+            app.state['dist_' + kind.value + '_' + a[0]] = inp.value;
+            run();
+          });
+          argsHost.appendChild(field(a[1], inp));
+        });
+        run();
+      }
+
+      function run() {
+        try {
+          var f = fnSel.value;
+          var v;
+          if (kind.value === 'normal') {
+            var mu = parseNum(inputs.mu.value), sd = parseNum(inputs.sd.value);
+            var x = parseNum(inputs.x.value), b = parseNum(inputs.b ? inputs.b.value : '0');
+            if (sd <= 0) throw new Error('σ must be > 0');
+            if (f === 'pd') v = E.Stat.normalPdf(x, mu, sd);
+            else if (f === 'cd') v = E.Stat.normalCdf(x, mu, sd);
+            else if (f === 'between') v = E.Stat.normalCdf(b, mu, sd) - E.Stat.normalCdf(x, mu, sd);
+            else v = mu + sd * E.Stat.normalInv(x);
+          } else if (kind.value === 'binomial') {
+            var n = Math.round(parseNum(inputs.n.value));
+            var pp = parseNum(inputs.p.value);
+            var k = Math.round(parseNum(inputs.x.value));
+            if (pp < 0 || pp > 1) throw new Error('0 ≤ p ≤ 1');
+            if (f === 'pd') v = E.Dist.binomialPdf(k, n, pp);
+            else if (f === 'cd') v = E.Dist.binomialCdf(k, n, pp);
+            else {
+              v = 0;
+              for (var i = 0; i <= k; i++) v += E.Dist.binomialPdf(i, n, pp);
+            }
+          } else {
+            var lam = parseNum(inputs.lam.value);
+            var kk = Math.round(parseNum(inputs.x.value));
+            if (lam <= 0) throw new Error('λ must be > 0');
+            v = f === 'pd' ? E.Dist.poissonPdf(kk, lam) : E.Dist.poissonCdf(kk, lam);
+          }
+          setOut(out, '<span class="out-label">' + fnSel.options[fnSel.selectedIndex].text + '</span><b>' +
+            E.formatValue(v, { format: 'norm' }) + '</b>');
+        } catch (e) { setOut(out, e.message, true); }
+      }
+
+      kind.addEventListener('change', function () { buildFns(); buildArgs(); });
+      fnSel.addEventListener('change', run);
+      p.appendChild(field('Type', kind));
+      p.appendChild(field('Function', fnSel));
+      p.appendChild(argsHost);
+      p.appendChild(out);
+      root.appendChild(p);
+      buildFns(); buildArgs();
+    }
+  };
+
+  /* ============================================================
+     SPREADSHEET
+     ============================================================ */
+  var SpreadsheetMode = {
+    id: 'spreadsheet', name: 'Spreadsheet', icon: '▦', color: '#4ade80',
+    desc: 'Cells with =A1+B1 formulas',
+    models: ['esplus', 'explus', 'cw'],
+    render: function (root, app) {
+      var p = panel(root);
+      head(p, 'Spreadsheet', 'Type numbers or formulas like =A1+B1');
+      var raw = app.state.sheet || [
+        ['1', '2', '=A1+B1', '', ''],
+        ['4', '5', '=A2+B2', '', ''],
+        ['=SUM(A1:A2)', '', '', '', '']
+      ];
+      var rows = 8, cols = 5;
+
+      var bar = el('div', 'sheet-bar');
+      var addr = el('span', 'sheet-addr', 'A1');
+      var fx = input({ placeholder: 'value or =formula', cls: 'sheet-input' });
+      bar.appendChild(addr);
+      bar.appendChild(fx);
+
+      var table = el('div', 'sheet-grid');
+      table.style.gridTemplateColumns = '26px repeat(' + cols + ', minmax(0,1fr))';
+
+      var cells = [];
+      var active = { r: 0, c: 0 };
+
+      function header() {
+        var h = el('div', 'sheet-head', '');
+        table.appendChild(h);
+        for (var c = 0; c < cols; c++) {
+          table.appendChild(el('div', 'sheet-head', String.fromCharCode(65 + c)));
+        }
+      }
+
+      function paint() {
+        var values;
+        try {
+          values = E.Sheet.evaluate(raw, rows, cols, { angle: app.state.angle, vars: app.state.vars });
+        } catch (e) { values = []; }
+
+        cells.forEach(function (row, r) {
+          row.forEach(function (cell, c) {
+            var v = values[r] ? values[r][c] : '';
+            cell.textContent = (typeof v === 'number')
+              ? E.formatValue(v, { format: 'norm' })
+              : String(v === undefined ? '' : v);
+            cell.classList.toggle('is-error', v === 'ERROR');
+            cell.classList.toggle('is-active', active.r === r && active.c === c);
+          });
+        });
+        addr.textContent = String.fromCharCode(65 + active.c) + (active.r + 1);
+        fx.value = raw[active.r] && raw[active.r][active.c] !== undefined ? raw[active.r][active.c] : '';
+        app.state.sheet = raw;
+      }
+
+      header();
+      for (var r = 0; r < rows; r++) {
+        table.appendChild(el('div', 'sheet-head sheet-rowh', String(r + 1)));
+        var line = [];
+        for (var c = 0; c < cols; c++) {
+          if (!raw[r]) raw[r] = [];
+          var cell = el('div', 'sheet-cell', '');
+          (function (r2, c2, node) {
+            node.addEventListener('click', function () {
+              active = { r: r2, c: c2 };
+              paint();
+              fx.focus();
+            });
+          })(r, c, cell);
+          line.push(cell);
+          table.appendChild(cell);
+        }
+        cells.push(line);
+      }
+
+      fx.addEventListener('input', function () {
+        if (!raw[active.r]) raw[active.r] = [];
+        raw[active.r][active.c] = fx.value;
+        paint();
+      });
+      fx.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          active = { r: Math.min(rows - 1, active.r + 1), c: active.c };
+          paint();
+        }
+      });
+
+      p.appendChild(bar);
+      p.appendChild(table);
+      var help = el('div', 'panel-note');
+      help.textContent = 'Formula: =A1+B1, =A1*2, =SUM(A1:A3), =AVERAGE(A1:A3), =MAX(A1:A3), =MIN(A1:A3)';
+      p.appendChild(help);
+      root.appendChild(p);
+      paint();
+    }
+  };
+
+  /* ============================================================
+     MATH BOX (dice / coin)
+     ============================================================ */
+  var MathBoxMode = {
+    id: 'mathbox', name: 'Math Box', icon: '⚄', color: '#fca5a5',
+    desc: 'Dice roll & coin toss',
+    models: ['esplus', 'explus', 'cw'],
+    render: function (root, app) {
+      var p = panel(root);
+      head(p, 'Math Box', 'Probability simulations');
+      var diceOut = el('div', 'mode-out dice-out');
+      var coinOut = el('div', 'mode-out');
+      var stats = { rolls: [], flips: { H: 0, T: 0 } };
+
+      var row1 = el('div', 'fld-row');
+      var faces = select([['6', '2 faces (coin)'], ['6', '6-sided'], ['8', '8-sided'], ['12', '12-sided'], ['20', '20-sided']], '6');
+      faces.options[0].value = '2';
+      var count = input({ value: '1' });
+      row1.appendChild(field('Die', faces));
+      row1.appendChild(field('Rolls', count));
+      p.appendChild(row1);
+
+      var rollBtn = btn('Roll dice', 'primary', function () {
+        var n = Math.max(1, Math.min(200, Math.round(parseNum(count.value) || 1)));
+        var sides = parseInt(faces.value, 10);
+        var results = [];
+        for (var i = 0; i < n; i++) results.push(1 + Math.floor(Math.random() * sides));
+        var sum = results.reduce(function (a, b) { return a + b; }, 0);
+        diceOut.innerHTML = '<span class="out-label">' + n + ' × d' + sides + '</span>' +
+          '<div class="dice-res">' + results.slice(0, 40).map(function (v) {
+            return '<span class="die">' + v + '</span>';
+          }).join('') + '</div>' +
+          '<div class="out-sub">sum ' + sum + ' · mean ' + (sum / n).toFixed(4) + '</div>';
+      });
+      p.appendChild(rollBtn);
+      p.appendChild(diceOut);
+
+      var coinBtn = btn('Toss coin ×10', 'ghost', function () {
+        for (var i = 0; i < 10; i++) {
+          if (Math.random() < 0.5) stats.flips.H++; else stats.flips.T++;
+        }
+        var total = stats.flips.H + stats.flips.T;
+        coinOut.innerHTML = '<span class="out-label">coin tosses</span>' +
+          '<b>H ' + stats.flips.H + ' · T ' + stats.flips.T + '</b>' +
+          '<div class="out-sub">' + total + ' tosses · P(H)=' +
+          (stats.flips.H / total).toFixed(4) + '</div>';
+      });
+      p.appendChild(coinBtn);
+      p.appendChild(coinOut);
+      root.appendChild(p);
+
+      var rp = panel(root);
+      head(rp, 'Random numbers', 'Uniform between two bounds');
+      var lo = input({ value: '1' });
+      var hi = input({ value: '100' });
+      var randOut = outBox(rp);
+      rp.appendChild(field('min', lo));
+      rp.appendChild(field('max', hi));
+      rp.appendChild(btn('Generate', 'primary', function () {
+        try {
+          var a = Math.ceil(parseNum(lo.value)), b = Math.floor(parseNum(hi.value));
+          if (b < a) throw new Error('max must be ≥ min');
+          var vals = [];
+          for (var i = 0; i < 6; i++) vals.push(a + Math.floor(Math.random() * (b - a + 1)));
+          setOut(randOut, '<b>' + vals.join(', ') + '</b>');
+        } catch (e) { setOut(randOut, e.message, true); }
+      }));
+      rp.appendChild(randOut);
+      root.appendChild(rp);
     }
   };
 
@@ -812,6 +1217,9 @@
         } catch (e) { setOut(out, e.message, true); }
       }
       p.appendChild(row);
+      var rPadHost = el('div');
+      p.appendChild(rPadHost);
+      attachPad(rPadHost, function () { return ['a','b','c','d'].map(function (k) { return inputs[k]; }); }, app);
       p.appendChild(out);
       root.appendChild(p);
       run();
@@ -868,6 +1276,10 @@
       row.appendChild(field('end', end));
       row.appendChild(field('step', step));
       p.appendChild(row);
+      attachPad(p, [start, end, step], app);
+      var rPadHost = el('div');
+      p.appendChild(rPadHost);
+      attachPad(rPadHost, function () { return ['a','b','c','d'].map(function (k) { return inputs[k]; }); }, app);
       p.appendChild(out);
       root.appendChild(p);
       run();
@@ -953,6 +1365,7 @@
       p.appendChild(field('Initial guess', guess));
       p.appendChild(field('Variable', variable));
       p.appendChild(btn('Solve', 'primary', run));
+      attachPad(p, [guess], app);
       p.appendChild(out);
       root.appendChild(p);
       run();
@@ -1021,7 +1434,13 @@
     verify: VerifyMode,
     solve: SolveMode,
     constants: ConstantsMode,
-    order: ['calc', 'complex', 'stat', 'matrix', 'vector', 'equation', 'basen', 'ratio', 'table', 'solve', 'verify', 'constants']
+    inequality: InequalityMode,
+    dist: DistMode,
+    spreadsheet: SpreadsheetMode,
+    mathbox: MathBoxMode,
+    order: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
+            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
+            'verify', 'mathbox', 'constants']
   };
 
 })(window);
