@@ -191,8 +191,10 @@
     if (key.s) b.appendChild(el('span', 'sh', key.s));
     if (key.a) b.appendChild(el('span', 'al', key.a));
     if (key.ic) b.appendChild(svgIcon(key.ic));
-    if (key.l) b.appendChild(el('span', 'lab ' + (key.sm || ''), key.l));
+    if (key.l && !key.icOnly) b.appendChild(el('span', 'lab ' + (key.sm || ''), key.l));
+    if (key.icOnly) b.classList.add('ic-only');
     if (key.cap) b.appendChild(el('span', 'cap', key.cap));
+    if (key.al2) b.appendChild(el('span', 'al2', key.al2));
 
     b.addEventListener('click', function (ev) {
       ev.preventDefault();
@@ -227,6 +229,8 @@
     func: 'M8 4.5v15M8 12h6.5M14.5 4.5v6',
     book: 'M12 6.5c-2-1.6-4.5-1.7-6.5-1.6v12c2-.1 4.5 0 6.5 1.6 2-1.6 4.5-1.7 6.5-1.6v-12c-2-.1-4.5 0-6.5 1.6ZM12 6.5v12',
     tools: 'M9.8 13.2a3.4 3.4 0 0 0 4.6-4.6L17 6l1 1-2.6 2.6a3.4 3.4 0 0 1-4.6 4.6L5 20l-1-1 5.8-5.8Z',
+    shift: 'M6 14.5 12 8.5l6 6M12 8.5v7',
+    del: 'M9.7 6.2h9.6a1 1 0 0 1 1 1v9.6a1 1 0 0 1-1 1H9.7L4 12l5.7-5.8Z',
     up: 'M12 18.5V6M6.5 11.5 12 6l5.5 5.5',
     down: 'M12 5.5V18M6.5 12.5 12 18l5.5-5.5',
     menu: 'M6.5 8.5h11M6.5 12h11M6.5 15.5h11'
@@ -236,11 +240,17 @@
     var NS = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('class', 'kic');
+    svg.setAttribute('class', 'kic' + (name === 'del' ? ' fill' : ''));
     svg.setAttribute('aria-hidden', 'true');
     var p = document.createElementNS(NS, 'path');
     p.setAttribute('d', ICONS[name] || '');
     svg.appendChild(p);
+    if (name === 'del') {
+      var x = document.createElementNS(NS, 'path');
+      x.setAttribute('class', 'x');
+      x.setAttribute('d', 'M11.6 9.6l4.8 4.8M16.4 9.6l-4.8 4.8');
+      svg.appendChild(x);
+    }
     return svg;
   }
 
@@ -275,14 +285,16 @@
     var groups = isCW ? 3 : (lay.controls || []).length;
     var groupsW = isCW ? groups * 0.82 : groups;      /* CW control rows are short */
     var keyRows = lay.rows.length;
-    var gapX = Math.max(2, Math.round(wide / lay.cols * 0.08));
+    var gapX = 0;                        /* the desktop pitch is the column */
+    var keyRatio = 0.80;                 /* keys are ~78% of their pitch */
     var free = avail - 12 - (keyRows - 1) * 8;
     var byH = Math.floor(free / (keyRows + groups * 0.82));
-    var byW = Math.floor(wide / lay.cols) - gapX;
+    var byW = Math.floor((wide - 10) / lay.cols);
     var kw = Math.max(16, Math.min(byH, byW));
 
     pad.style.setProperty('--kw', kw + 'px');
-    pad.style.setProperty('--kgx', gapX + 'px');
+    pad.style.setProperty('--kd', Math.round(kw * 0.83) + 'px');
+    pad.style.setProperty('--kgx', '0px');
 
     /* converge on the biggest key size that still fits the device */
     function measure() {
@@ -304,12 +316,15 @@
       if (next === kw) break;
       kw = Math.max(14, next);
       pad.style.setProperty('--kw', kw + 'px');
+      pad.style.setProperty('--kd', Math.round(kw * 0.83) + 'px');
+      pad.style.setProperty('--kd', Math.round(kw * 0.83) + 'px');
       if (kw <= 14) break;
     }
     /* guarantee no overflow on very short screens */
     for (var guard = 0; guard < 24 && pad.scrollHeight > pad.clientHeight + 1; guard++) {
       kw = Math.max(14, kw - 1);
       pad.style.setProperty('--kw', kw + 'px');
+      pad.style.setProperty('--kd', Math.round(kw * 0.83) + 'px');
       if (kw === 14) break;
     }
   }
@@ -882,8 +897,7 @@
     /* Calculate / Complex use the main LCD + keypad, no workspace */
     if (id === 'calc' || id === 'complex') {
       $('workspace').hidden = true;
-      paint();
-      toast(m.name);
+      paint();          /* the mode name is already shown in the top bar */
       return;
     }
 

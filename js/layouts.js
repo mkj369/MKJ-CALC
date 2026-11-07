@@ -22,25 +22,25 @@
   function numRows(variant) {
     return [
       [
-        K('7', '7', { c: 'n', s: 'x̂' }), K('8', '8', { c: 'n' }), K('9', '9', { c: 'n' }),
-        CMD('DEL', 'del', { c: 'd' }), CMD('AC', 'ac', { c: 'a' })
+        K('7', '7', { c: 'n', s: 'x̂', al2: 'x̂' }), K('8', '8', { c: 'n' }), K('9', '9', { c: 'n' }),
+        CMD('DEL', 'del', { c: 'd', ic: 'del', icOnly: true }), CMD('AC', 'ac', { c: 'a' })
       ],
       [
-        K('4', '4', { c: 'n' }), K('5', '5', { c: 'n' }), K('6', '6', { c: 'n' }),
+        K('4', '4', { c: 'n', al2: 'A' }), K('5', '5', { c: 'n' }), K('6', '6', { c: 'n' }),
         K('×', '*', { c: 'o' }), K('÷', '/', { c: 'o' })
       ],
       [
-        K('1', '1', { c: 'n' }), K('2', '2', { c: 'n' }), K('3', '3', { c: 'n' }),
+        K('1', '1', { c: 'n', al2: 'B' }), K('2', '2', { c: 'n' }), K('3', '3', { c: 'n' }),
         K('+', '+', { c: 'o' }), K('−', '-', { c: 'o' })
       ],
       variant === 'cw'
         ? [
-            K('0', '0', { c: 'n' }), K('.', '.', { c: 'n' }), K('×10ˣ', '×10^(', { c: 'f', sm: 'sm' }),
-            CMD('FORMAT', 'sd', { c: 'd', sm: 'xs' }),
+            K('0', '0', { c: 'n', al2: 'x' }), K('.', '.', { c: 'n' }), K('×10ˣ', '×10^(', { c: 'f', sm: 'sm' }),
+            CMD('FORMAT', 'sd', { c: 'd ring', sm: 'xs' }),
             CMD('EXE', 'equals', { c: 'e', sm: 'sm' })
           ]
         : [
-            K('0', '0', { c: 'n' }), K('.', '.', { c: 'n' }),
+            K('0', '0', { c: 'n', al2: 'x' }), K('.', '.', { c: 'n' }),
             K('(', '(', { c: 'f', s: '%', sv: '%' }), K(')', ')', { c: 'f', s: ',', sv: ',' }),
             CMD('=', 'equals', { c: 'e' })
           ]
@@ -72,7 +72,7 @@
       CMD('', 'left', { c: 'ctl nav', ic: 'left', gr: 2, gc: 3 }),
       CMD('', 'ok', { c: 'ctl ok', gr: 2, gc: 4 }),
       CMD('', 'right', { c: 'ctl nav', ic: 'right', gr: 2, gc: 5 }),
-      CMD('SHIFT', 'shift', { c: 'shift', gr: 3, gc: 1, cap: 'SHIFT' }),
+      CMD('SHIFT', 'shift', { c: 'shift', ic: 'shift', gr: 3, gc: 1, cap: 'SHIFT' }),
       CMD('VARIABLE', 'variable', { c: 'ctl', ic: 'var', gr: 3, gc: 2, cap: 'VARIABLE' }),
       CMD('FUNCTION', 'catalog', { c: 'ctl', ic: 'func', gr: 3, gc: 3, cap: 'FUNCTION' }),
       CMD('', 'down', { c: 'ctl nav', ic: 'down', gr: 3, gc: 4 }),
