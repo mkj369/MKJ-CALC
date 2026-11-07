@@ -1,245 +1,286 @@
 /* ============================================================
-   MKJ CALC — expression engine
-   Tokenizer + recursive-descent parser + evaluator.
-   No external dependencies.
+   MKJ CALC — engine v2  (full scientific engine)
+
+   Contents
+     1.  small complex-number library
+     2.  constants & physical constants
+     3.  tokenizer
+     4.  parser (real + complex paths)
+     5.  math function library
+     6.  calculus: d/dx, ∫dx, Σ, Π
+     7.  solve / calc
+     8.  matrices & vectors
+     9.  statistics, regression, distributions
+     10. base-N conversion
+     11. rational (fraction) helpers
+     12. number formatting  (Norm / Fix / Sci / Eng / Rect / Polar)
    ============================================================ */
 (function (global) {
   'use strict';
 
-  /* ----------------------------------------------------------
-     Constants
-     ---------------------------------------------------------- */
-  var CONSTANTS = {
-    'π': Math.PI,
-    'pi': Math.PI,
-    'e': Math.E,
-    'τ': Math.PI * 2
+  /* ============================================================
+     1. complex numbers  (plain objects: {re, im})
+     ============================================================ */
+  var C = {
+    make: function (re, im) { return { re: re, im: im || 0 }; },
+    isC: function (z) { return z !== null && typeof z === 'object' && 're' in z && 'im' in z; },
+    isPair: function (z) { return z !== null && typeof z === 'object' && 'pair' in z; },
+    add: function (a, b) { a = C.to(a); b = C.to(b); return { re: a.re + b.re, im: a.im + b.im }; },
+    sub: function (a, b) { a = C.to(a); b = C.to(b); return { re: a.re - b.re, im: a.im - b.im }; },
+    mul: function (a, b) {
+      a = C.to(a); b = C.to(b);
+      return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re };
+    },
+    div: function (a, b) {
+      a = C.to(a); b = C.to(b);
+      var d = b.re * b.re + b.im * b.im;
+      if (d === 0) throw mathError();
+      return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
+    },
+    abs: function (z) { z = C.to(z); return Math.hypot(z.re, z.im); },
+    arg: function (z) { z = C.to(z); return Math.atan2(z.im, z.re); },
+    to: function (z) {
+      if (C.isC(z)) return z;
+      if (C.isPair(z)) return { re: z.pair[0], im: 0 };
+      return { re: Number(z) || 0, im: 0 };
+    },
+    pow: function (a, b) {
+      a = C.to(a); b = C.to(b);
+      if (a.im === 0 && b.im === 0 && a.re >= 0) return { re: Math.pow(a.re, b.re), im: 0 };
+      var r = C.abs(a), th = C.arg(a);
+      var nr = Math.pow(r, b.re) * Math.exp(-b.im * th);
+      var nth = b.re * th + b.im * Math.log(r || 1);
+      return { re: nr * Math.cos(nth), im: nr * Math.sin(nth) };
+    },
+    neg: function (a) { a = C.to(a); return { re: -a.re, im: -a.im }; },
+    sqrt: function (a) {
+      a = C.to(a);
+      if (a.im === 0 && a.re >= 0) return { re: Math.sqrt(a.re), im: 0 };
+      var r = Math.sqrt(C.abs(a));
+      var th = C.arg(a) / 2;
+      return { re: r * Math.cos(th), im: r * Math.sin(th) };
+    },
+    isReal: function (z) { return !C.isC(z) || Math.abs(z.im) < 1e-12; },
+    clean: function (z) {
+      if (!C.isC(z)) {
+        var v = Math.round(z * 1e12) / 1e12;
+        return Math.abs(v) < 1e-13 ? 0 : v;
+      }
+      var re = Math.abs(z.re) < 1e-13 ? 0 : Math.round(z.re * 1e12) / 1e12;
+      var im = Math.abs(z.im) < 1e-13 ? 0 : Math.round(z.im * 1e12) / 1e12;
+      return { re: re, im: im };
+    }
   };
 
-  var ANGLE = { deg: 'deg', rad: 'rad', grad: 'grad' };
+  function mathError() { var e = new CalcError('Math ERROR'); return e; }
+  function syntaxError() { var e = new CalcError('Syntax ERROR'); return e; }
 
-  /* ----------------------------------------------------------
-     Tokenizer
-     ---------------------------------------------------------- */
-  var FUNCTIONS = [
-    'sin⁻¹', 'cos⁻¹', 'tan⁻¹', 'sinh⁻¹', 'cosh⁻¹', 'tanh⁻¹',
-    'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh',
-    'sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh',
-    'log', 'ln', 'lg', 'log₂', 'log2', 'exp',
-    'sqrt', 'cbrt', 'abs', 'nCr', 'nPr', 'gcd', 'lcm',
-    'min', 'max', 'floor', 'ceil', 'round', 'rand'
-  ];
-
-  function isDigit(c) { return c >= '0' && c <= '9'; }
-  function isLetter(c) { return /[A-Za-z]/.test(c); }
-
-  /**
-   * Token types: num, var, func, op, lparen, rparen, comma, const, post
-   */
-  function tokenize(src) {
-    var tokens = [];
-    var i = 0;
-    var s = String(src)
-      .replace(/×/g, '*').replace(/÷/g, '/')
-      .replace(/−/g, '-').replace(/⁻/g, '-')
-      .replace(/,/g, ',')
-      .replace(/％/g, '%');
-
-    while (i < s.length) {
-      var c = s[i];
-
-      // whitespace
-      if (c === ' ') { i++; continue; }
-
-      // numbers (incl. scientific 'E' notation produced by display)
-      if (isDigit(c) || (c === '.' && isDigit(s[i + 1]))) {
-        var num = '';
-        while (i < s.length && (isDigit(s[i]) || s[i] === '.')) { num += s[i++]; }
-        if ((s[i] === 'E' || s[i] === 'e' || s[i] === '×') && /[Ee×]/.test(s[i])) {
-          // '×10' style is handled as multiplication; only E notation here
-          if (/[Ee]/.test(s[i]) && (isDigit(s[i + 1]) || ((s[i + 1] === '+' || s[i + 1] === '-') && isDigit(s[i + 2])))) {
-            num += s[i++];
-            if (s[i] === '+' || s[i] === '-') num += s[i++];
-            while (i < s.length && isDigit(s[i])) num += s[i++];
-          }
-        }
-        tokens.push({ t: 'num', v: parseFloat(num) });
-        continue;
-      }
-
-      // π, τ
-      if (c === 'π' || c === 'τ') { tokens.push({ t: 'const', v: c }); i++; continue; }
-
-      // superscript postfix operators
-      if (c === '²') { tokens.push({ t: 'post', v: 'sq' }); i++; continue; }
-      if (c === '³') { tokens.push({ t: 'post', v: 'cube' }); i++; continue; }
-      if (c === '!' ) { tokens.push({ t: 'post', v: 'fact' }); i++; continue; }
-      if (c === '%' ) { tokens.push({ t: 'post', v: 'pct' }); i++; continue; }
-
-      // letters: function names, constants, variables
-      if (isLetter(c)) {
-        var start = i;
-        var word = '';
-        while (i < s.length && (isLetter(s[i]) || isDigit(s[i]) || s[i] === '₂')) { word += s[i++]; }
-        // accept the inverse-function suffix: sin⁻¹, cos⁻¹, tan⁻¹, sinh⁻¹ ...
-        if (s.substr(i, 3) === '⁻¹(' || s.substr(i, 2) === '⁻¹') {
-          word += '⁻¹';
-          i += 2;
-        }
-        // accept superscript exponent suffix e.g. eˣ is handled as exp(
-        if (s[i] === 'ˣ') { i++; word += '^'; }
-
-        // 'pi' constant
-        if (word.toLowerCase() === 'pi') { tokens.push({ t: 'const', v: 'π' }); continue; }
-        if (word.toLowerCase() === 'ans') { tokens.push({ t: 'ans' }); continue; }
-        if (word.toLowerCase() === 'e' && s[start - 1] !== ' ') { /* fallthrough as const */ }
-
-        var lower = word.toLowerCase();
-        var fn = null;
-        for (var f = 0; f < FUNCTIONS.length; f++) {
-          if (FUNCTIONS[f] === word || FUNCTIONS[f] === lower) { fn = FUNCTIONS[f]; break; }
-        }
-        if (fn) { tokens.push({ t: 'func', v: fn }); continue; }
-        if (lower === 'e') { tokens.push({ t: 'const', v: 'e' }); continue; }
-        if (lower === 'x') { tokens.push({ t: 'var', v: 'x' }); continue; }
-        if (lower === 'y') { tokens.push({ t: 'var', v: 'y' }); continue; }
-
-        // single uppercase letter → variable A..F, M
-        if (word.length === 1) { tokens.push({ t: 'var', v: word.toUpperCase() }); continue; }
-        // unknown multi-letter → treat as implicit var product? reject
-        tokens.push({ t: 'unknown', v: word });
-        continue;
-      }
-
-      switch (c) {
-        case '+': case '-': case '*': case '/': case '^': case '÷': case '×':
-          tokens.push({ t: 'op', v: c === '÷' ? '/' : c === '×' ? '*' : c });
-          i++; continue;
-        case '(': tokens.push({ t: 'lparen' }); i++; continue;
-        case ')': tokens.push({ t: 'rparen' }); i++; continue;
-        case ',': tokens.push({ t: 'comma' }); i++; continue;
-        case '√': tokens.push({ t: 'func', v: 'sqrt' }); i++; continue;
-        case '∛': tokens.push({ t: 'func', v: 'cbrt' }); i++; continue;
-        case '∛': i++; continue;
-        default:
-          throw new CalcError('Syntax ERROR');
-      }
-    }
-    return tokens;
-  }
-
-  /* ----------------------------------------------------------
-     Error type
-     ---------------------------------------------------------- */
   function CalcError(msg) {
     this.name = 'CalcError';
     this.message = msg || 'Math ERROR';
   }
   CalcError.prototype = Object.create(Error.prototype);
 
-  /* ----------------------------------------------------------
-     Helpers
-     ---------------------------------------------------------- */
-  function toRad(value, unit) {
-    if (unit === 'rad') return value;
-    if (unit === 'grad') return value * Math.PI / 200;
-    return value * Math.PI / 180;
-  }
-  function fromRad(value, unit) {
-    if (unit === 'rad') return value;
-    if (unit === 'grad') return value * 200 / Math.PI;
-    return value * 180 / Math.PI;
+  /* ============================================================
+     2. constants
+     ============================================================ */
+  var CONST = {
+    'π': Math.PI, 'e': Math.E, 'τ': Math.PI * 2
+  };
+
+  var PHYS = {
+    'c': 299792458,            // speed of light   m/s
+    'g': 9.80665,              // gravity          m/s²
+    'G': 6.67430e-11,          // gravitation
+    'h': 6.62607015e-34,       // Planck
+    'ℏ': 1.054571817e-34,
+    'k': 1.380649e-23,         // Boltzmann
+    'NA': 6.02214076e23,       // Avogadro
+    'R': 8.314462618,          // gas constant
+    'F': 96485.33212,          // Faraday
+    'me': 9.1093837015e-31,    // electron mass
+    'mp': 1.67262192369e-27,   // proton mass
+    'mn': 1.67492749804e-27,
+    'qe': 1.602176634e-19,     // elementary charge
+    'u': 1.66053906660e-27,    // atomic mass unit
+    'σ': 5.670374419e-8,       // Stefan-Boltzmann
+    'ε0': 8.8541878128e-12,
+    'μ0': 1.25663706212e-6,
+    'atm': 101325,
+    'gn': 9.80665
+  };
+
+  /* ============================================================
+     3. tokenizer
+     ============================================================ */
+  var FUNCS = [
+    'sin⁻¹', 'cos⁻¹', 'tan⁻¹', 'sinh⁻¹', 'cosh⁻¹', 'tanh⁻¹',
+    'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh',
+    'sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh',
+    'sin⁻¹h', 'cos⁻¹h', 'tan⁻¹h',
+    'log', 'ln', 'lg', 'log₂', 'exp',
+    'sqrt', 'cbrt', 'abs', 'Abs', 'sign', 'floor', 'ceil', 'round', 'int', 'frac',
+    'nCr', 'nPr', 'gcd', 'lcm', 'min', 'max', 'rand', 'randInt', 'RanInt',
+    'Arg', 'Conjg', 'Re', 'Im', 'abs2',
+    'Pol', 'Rec', 'd', 'Sum'
+  ];
+
+  function isDigit(c) { return c >= '0' && c <= '9'; }
+  function isAlpha(c) { return /[A-Za-z]/.test(c); }
+
+  function tokenize(input) {
+    var s = String(input)
+      .replace(/×/g, '*')
+      .replace(/÷/g, '/')
+      .replace(/−/g, '-')
+      .replace(/▸/g, '')
+      .replace(/[∠]/g, '∠');
+    var tokens = [];
+    var i = 0;
+
+    while (i < s.length) {
+      var c = s[i];
+
+      if (c === ' ' || c === '\n' || c === '\t') { i++; continue; }
+
+      /* numbers, with E notation */
+      if (isDigit(c) || (c === '.' && isDigit(s[i + 1]))) {
+        var numStr = '';
+        while (i < s.length && (isDigit(s[i]) || s[i] === '.')) numStr += s[i++];
+        if ((s[i] === 'E' || s[i] === 'e') && (isDigit(s[i + 1]) || ((s[i + 1] === '+' || s[i + 1] === '-') && isDigit(s[i + 2])))) {
+          numStr += 'e'; i++;
+          if (s[i] === '+' || s[i] === '-') numStr += s[i++];
+          while (i < s.length && isDigit(s[i])) numStr += s[i++];
+        }
+        tokens.push({ t: 'num', v: parseFloat(numStr) });
+        continue;
+      }
+
+      /* constants */
+      if (c === 'π' || c === 'τ') { tokens.push({ t: 'const', v: c }); i++; continue; }
+
+      /* postfix */
+      if (c === '²') { tokens.push({ t: 'post', v: 'sq' }); i++; continue; }
+      if (c === '³') { tokens.push({ t: 'post', v: 'cube' }); i++; continue; }
+      if (c === '!') { tokens.push({ t: 'post', v: 'fact' }); i++; continue; }
+      if (c === '%') { tokens.push({ t: 'post', v: 'pct' }); i++; continue; }
+      if (c === '°') { tokens.push({ t: 'post', v: 'deg' }); i++; continue; }
+      if (c === 'ʳ') { tokens.push({ t: 'post', v: 'rad' }); i++; continue; }
+      if (c === 'ᵍ') { tokens.push({ t: 'post', v: 'grad' }); i++; continue; }
+
+      /* angle / complex operator */
+      if (c === '∠') { tokens.push({ t: 'op', v: '∠' }); i++; continue; }
+
+      /* words */
+      if (isAlpha(c)) {
+        var word = '';
+        while (i < s.length && (isAlpha(s[i]) || isDigit(s[i]) || s[i] === '₂')) word += s[i++];
+        if (s.substr(i, 2) === '⁻¹') { word += '⁻¹'; i += 2; }
+
+        var low = word.toLowerCase();
+
+        if (low === 'pi') { tokens.push({ t: 'const', v: 'π' }); continue; }
+        if (low === 'ans') { tokens.push({ t: 'ans' }); continue; }
+        if (low === 'i') { tokens.push({ t: 'imag' }); continue; }
+        if (low === 'e') { tokens.push({ t: 'const', v: 'e' }); continue; }
+
+        var fn = null;
+        for (var f = 0; f < FUNCS.length; f++) {
+          if (FUNCS[f].toLowerCase() === low) { fn = FUNCS[f]; break; }
+        }
+        if (fn) { tokens.push({ t: 'func', v: fn }); continue; }
+
+        if (word.length === 1 && /[A-FMXY]/.test(word)) { tokens.push({ t: 'var', v: word }); continue; }
+        if (word.length === 1 && /[a-z]/.test(word)) { tokens.push({ t: 'var', v: word }); continue; }
+        if (PHYS[word] !== undefined) { tokens.push({ t: 'num', v: PHYS[word] }); continue; }
+
+        tokens.push({ t: 'unknown', v: word });
+        continue;
+      }
+
+      switch (c) {
+        case '+': case '-': case '*': case '/': case '^':
+          tokens.push({ t: 'op', v: c }); i++; continue;
+        case '(': tokens.push({ t: 'lparen' }); i++; continue;
+        case ')': tokens.push({ t: 'rparen' }); i++; continue;
+        case ',': tokens.push({ t: 'comma' }); i++; continue;
+        case '√': tokens.push({ t: 'func', v: 'sqrt' }); i++; continue;
+        case '∛': tokens.push({ t: 'func', v: 'cbrt' }); i++; continue;
+        case '∑': tokens.push({ t: 'func', v: 'Sum' }); i++; continue;
+        case '∫': tokens.push({ t: 'func', v: 'Integral' }); i++; continue;
+        case '=': tokens.push({ t: 'eq' }); i++; continue;
+        case ':': tokens.push({ t: 'colon' }); i++; continue;
+        case '→': tokens.push({ t: 'arrow' }); i++; continue;
+        case '_': tokens.push({ t: 'under' }); i++; continue;
+        default:
+          throw syntaxError();
+      }
+    }
+    return tokens;
   }
 
-  function factorial(n) {
-    if (n < 0 || Math.abs(n % 1) > 1e-9) throw new CalcError('Math ERROR');
-    if (n > 170) return Infinity;
-    var r = 1;
-    for (var k = 2; k <= n; k++) r *= k;
-    return r;
-  }
-
-  function nCr(n, r) {
-    if (r < 0 || n < 0 || r > n) throw new CalcError('Math ERROR');
-    r = Math.min(r, n - r);
-    var res = 1;
-    for (var k = 1; k <= r; k++) res = res * (n - r + k) / k;
-    return Math.round(res * 1e10) / 1e10;
-  }
-
-  function gcd2(a, b) {
-    a = Math.abs(a); b = Math.abs(b);
-    while (b) { var t = b; b = a % b; a = t; }
-    return a;
-  }
-
-  /* ----------------------------------------------------------
-     Parser
-     ---------------------------------------------------------- */
+  /* ============================================================
+     4. parser
+     ------------------------------------------------------------
+     Every operator works on either a number or a complex object.
+     ============================================================ */
   function Parser(tokens, ctx) {
-    this.tokens = tokens;
-    this.pos = 0;
+    this.tk = tokens;
+    this.p = 0;
     this.ctx = ctx;
   }
 
-  Parser.prototype.peek = function (offset) {
-    return this.tokens[this.pos + (offset || 0)];
+  Parser.prototype.peek = function (n) { return this.tk[this.p + (n || 0)]; };
+  Parser.prototype.next = function () { return this.tk[this.p++]; };
+  Parser.prototype.isOp = function (v) {
+    var t = this.peek();
+    return t && t.t === 'op' && t.v === v;
   };
-  Parser.prototype.next = function () {
-    return this.tokens[this.pos++];
-  };
-  Parser.prototype.match = function (type, value) {
-    var tk = this.peek();
-    if (!tk) return false;
-    if (tk.t !== type) return false;
-    if (value !== undefined && tk.v !== value) return false;
-    this.pos++;
+  Parser.prototype.accept = function (type, value) {
+    var t = this.peek();
+    if (!t || t.t !== type) return false;
+    if (value !== undefined && t.v !== value) return false;
+    this.p++;
     return true;
   };
   Parser.prototype.expect = function (type, value) {
-    if (!this.match(type, value)) throw new CalcError('Syntax ERROR');
+    if (!this.accept(type, value)) throw syntaxError();
   };
 
-  // expr := term (('+'|'-') term)*
+  /* expr := term (('+'|'-') term)* */
   Parser.prototype.parseExpr = function () {
     var left = this.parseTerm();
     for (;;) {
-      var tk = this.peek();
-      if (tk && tk.t === 'op' && (tk.v === '+' || tk.v === '-')) {
-        this.next();
+      var t = this.peek();
+      if (t && t.t === 'op' && (t.v === '+' || t.v === '-')) {
+        this.p++;
         var right = this.parseTerm();
-        left = tk.v === '+' ? left + right : left - right;
+        left = t.v === '+' ? C.add(left, right) : C.sub(left, right);
       } else break;
     }
     return left;
   };
 
-  // term := unary (('*'|'/') unary | implicit-mul)*
+  /* term := unary (('*'|'/') unary | implicit)* */
   Parser.prototype.parseTerm = function () {
     var left = this.parseUnary();
-
     for (;;) {
-      var tk = this.peek();
-      if (!tk) break;
+      var t = this.peek();
+      if (!t) break;
 
-      if (tk.t === 'op' && (tk.v === '*' || tk.v === '/')) {
-        this.next();
-        var right = this.parseUnary();
-        if (tk.v === '*') left = left * right;
-        else {
-          if (right === 0) throw new CalcError('Math ERROR');
-          left = left / right;
-        }
+      if (t.t === 'op' && (t.v === '*' || t.v === '/')) {
+        this.p++;
+        var r = this.parseUnary();
+        left = t.v === '*' ? C.mul(left, r) : C.div(left, r);
         continue;
       }
 
-      // implicit multiplication: 2(3+4), 2π, 3sin(30), 2A, )( 
       var startsValue =
-        tk.t === 'num' || tk.t === 'const' || tk.t === 'var' ||
-        tk.t === 'func' || tk.t === 'lparen' || tk.t === 'ans';
+        t.t === 'num' || t.t === 'const' || t.t === 'var' || t.t === 'imag' ||
+        t.t === 'func' || t.t === 'lparen' || t.t === 'ans';
+
       if (startsValue) {
-        var val = this.parseUnary();
-        left = left * val;
+        left = C.mul(left, this.parseUnary());
         continue;
       }
       break;
@@ -248,263 +289,855 @@
   };
 
   Parser.prototype.parseUnary = function () {
-    var tk = this.peek();
-    if (tk && tk.t === 'op' && (tk.v === '-' || tk.v === '+')) {
-      this.next();
+    var t = this.peek();
+    if (t && t.t === 'op' && (t.v === '-' || t.v === '+')) {
+      this.p++;
       var v = this.parseUnary();
-      return tk.v === '-' ? -v : v;
+      return t.v === '-' ? C.neg(v) : v;
     }
     return this.parsePower();
   };
 
-  // power := postfix ('^' unary)?   (right-assoc)
   Parser.prototype.parsePower = function () {
     var base = this.parsePostfix();
-    var tk = this.peek();
-    if (tk && tk.t === 'op' && tk.v === '^') {
-      this.next();
-      var exp = this.parseUnary();
-      var out = Math.pow(base, exp);
-      if (isNaN(out)) throw new CalcError('Math ERROR');
-      return out;
+    var t = this.peek();
+    if (t && t.t === 'op' && t.v === '^') {
+      this.p++;
+      var e = this.parseUnary();
+      return C.pow(base, e);
+    }
+    // ∠ complex polar operator: r∠θ
+    if (t && t.t === 'op' && t.v === '∠') {
+      this.p++;
+      var ang = this.parseUnary();
+      var r = num(base), a = num(ang);
+      var rad = toRadRaw(a, this.ctx.angle);
+      return { re: r * Math.cos(rad), im: r * Math.sin(rad) };
     }
     return base;
   };
 
   Parser.prototype.parsePostfix = function () {
-    var val = this.parsePrimary();
+    var v = this.parsePrimary();
     for (;;) {
-      var tk = this.peek();
-      if (!tk || tk.t !== 'post') break;
-      this.next();
-      if (tk.v === 'sq') val = val * val;
-      else if (tk.v === 'cube') val = val * val * val;
-      else if (tk.v === 'fact') val = factorial(val);
-      else if (tk.v === 'pct') val = val / 100;
+      var t = this.peek();
+      if (!t || t.t !== 'post') break;
+      this.p++;
+      switch (t.v) {
+        case 'sq': v = C.mul(v, v); break;
+        case 'cube': v = C.mul(C.mul(v, v), v); break;
+        case 'fact': v = { re: factorial(num(v)), im: 0 }; break;
+        case 'pct': v = C.div(v, 100); break;
+        case 'deg': { // °  → radians when in rad/grad mode
+          var rv = num(v);
+          v = { re: toRadRaw(rv, 'deg'), im: 0 };
+          break;
+        }
+        case 'rad': v = { re: num(v), im: 0 }; break;
+        case 'grad': v = { re: toRadRaw(num(v), 'grad'), im: 0 }; break;
+      }
     }
-    return val;
+    return v;
   };
 
   Parser.prototype.parsePrimary = function () {
-    var tk = this.next();
-    if (!tk) throw new CalcError('Syntax ERROR');
+    var t = this.next();
+    if (!t) throw syntaxError();
 
-    if (tk.t === 'num') return tk.v;
-    if (tk.t === 'const') return CONSTANTS[tk.v];
-    if (tk.t === 'ans') return this.ctx.ans;
-    if (tk.t === 'var') {
-      var name = tk.v;
-      if (name === 'x' || name === 'y') {
-        return this.ctx.vars[name] !== undefined ? this.ctx.vars[name] : 0;
-      }
-      return this.ctx.vars[name] !== undefined ? this.ctx.vars[name] : 0;
+    if (t.t === 'num') return { re: t.v, im: 0 };
+    if (t.t === 'const') return { re: CONST[t.v], im: 0 };
+    if (t.t === 'imag') return { re: 0, im: 1 };
+    if (t.t === 'ans') return C.to(this.ctx.ans);
+    if (t.t === 'var') {
+      var name = t.v;
+      var val = this.ctx.vars[name];
+      if (val === undefined) val = 0;
+      return C.to(val);
     }
 
-    if (tk.t === 'lparen') {
+    if (t.t === 'lparen') {
       var inner = this.parseExpr();
       this.expect('rparen');
       return inner;
     }
 
-    if (tk.t === 'func') {
-      return this.callFunction(tk.v);
-    }
+    if (t.t === 'func') return this.callFunc(t.v);
 
-    if (tk.t === 'op' && tk.v === '-') {
-      return -this.parseUnary();
-    }
+    if (t.t === 'op' && t.v === '-') return C.neg(this.parseUnary());
 
-    throw new CalcError('Syntax ERROR');
+    throw syntaxError();
   };
 
-  Parser.prototype.argList = function () {
+  Parser.prototype.parseArgs = function () {
     var args = [this.parseExpr()];
-    while (this.match('comma')) args.push(this.parseExpr());
+    while (this.accept('comma')) args.push(this.parseExpr());
     return args;
   };
 
-  Parser.prototype.callFunction = function (name) {
-    var args;
-    var wrapOnly = /^(sin|cos|tan|sin⁻¹|cos⁻¹|tan⁻¹|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|ln|lg|log₂|log2|exp|sqrt|cbrt|abs|floor|ceil|round|rand)/;
-
-    if (name === 'rand') {
-      return Math.random();
-    }
-
-    if (!this.match('lparen')) {
-      // allow sin30 style (single value follows without parens)
-      if (wrapOnly.test(name)) {
-        args = [this.parseUnary()];
-        return this.applyFunction(name, args);
+  Parser.prototype.callFunc = function (name) {
+    var self = this;
+    var argFn = function (single) {
+      if (self.accept('lparen')) {
+        var list = self.parseArgs();
+        self.expect('rparen');
+        return list;
       }
-      throw new CalcError('Syntax ERROR');
-    }
-
-    args = this.argList();
-    this.expect('rparen');
-    return this.applyFunction(name, args);
-  };
-
-  Parser.prototype.applyFunction = function (name, a) {
-    var x = a[0], y = a[1];
-    var u = this.ctx.angle;
-
-    switch (name) {
-      case 'sin': return clean(Math.sin(toRad(x, u)));
-      case 'cos': return clean(Math.cos(toRad(x, u)));
-      case 'tan': {
-        var tr = toRad(x, u);
-        var c = Math.cos(tr);
-        if (Math.abs(c) < 1e-12) throw new CalcError('Math ERROR');
-        return clean(Math.sin(tr) / c);
-      }
-      case 'sin⁻¹': case 'asin': return fromRad(Math.asin(x), u);
-      case 'cos⁻¹': case 'acos': return fromRad(Math.acos(x), u);
-      case 'tan⁻¹': case 'atan': return fromRad(Math.atan(x), u);
-      case 'sinh': return Math.sinh(x);
-      case 'cosh': return Math.cosh(x);
-      case 'tanh': return Math.tanh(x);
-      case 'sinh⁻¹': case 'asinh': return Math.asinh(x);
-      case 'cosh⁻¹': case 'acosh': return Math.acosh(x);
-      case 'tanh⁻¹': case 'atanh': return Math.atanh(x);
-      case 'log': case 'lg':
-        if (a.length === 2) return Math.log(y) / Math.log(x);
-        if (x <= 0) throw new CalcError('Math ERROR');
-        return Math.log10(x);
-      case 'ln':
-        if (x <= 0) throw new CalcError('Math ERROR');
-        return Math.log(x);
-      case 'log₂': case 'log2':
-        if (x <= 0) throw new CalcError('Math ERROR');
-        return Math.log2(x);
-      case 'exp': return Math.exp(x);
-      case 'sqrt':
-        if (x < 0) throw new CalcError('Math ERROR');
-        return Math.sqrt(x);
-      case 'cbrt': return Math.cbrt(x);
-      case 'abs': return Math.abs(x);
-      case 'floor': return Math.floor(x);
-      case 'ceil': return Math.ceil(x);
-      case 'round': return Math.round(x);
-      case 'nCr': return nCr(Math.round(x), Math.round(y));
-      case 'nPr': return factorial(Math.round(x)) / factorial(Math.round(x) - Math.round(y));
-      case 'gcd': return gcd2(Math.round(x), Math.round(y));
-      case 'lcm': return Math.abs(Math.round(x) * Math.round(y)) / gcd2(Math.round(x), Math.round(y));
-      case 'min': return Math.min.apply(null, a);
-      case 'max': return Math.max.apply(null, a);
-      default: throw new CalcError('Syntax ERROR');
-    }
-  };
-
-  function clean(v) {
-    // kill floating-point dust so sin(30) is exactly .5 and not 0.49999999999999994
-    if (!isFinite(v)) return v;
-    var r = Math.round(v * 1e12) / 1e12;
-    return Math.abs(r) < 1e-13 ? 0 : r;
-  }
-
-  /* ----------------------------------------------------------
-     Public evaluate
-     ---------------------------------------------------------- */
-  function evaluate(expression, options) {
-    var ctx = {
-      angle: (options && options.angle) || 'deg',
-      ans: (options && options.ans) || 0,
-      vars: (options && options.vars) || {}
+      return [self.parseUnary()];
     };
-    var src = String(expression || '').trim();
-    if (!src) throw new CalcError('Syntax ERROR');
 
-    // auto close parentheses
-    var open = 0;
-    for (var k = 0; k < src.length; k++) {
-      if (src[k] === '(') open++;
-      else if (src[k] === ')') open--;
+    /* special forms with commas / ranges */
+    if (name === 'Sum' || name === 'Integral' || name === 'd') {
+      throw syntaxError(); // handled by structural helpers below
     }
-    while (open-- > 0) src += ')';
+    if (name === 'Pol' || name === 'Rec') {
+      var p = argFn();
+      var x = num(p[0]), y = num(p[1]);
+      if (name === 'Pol') {
+        var rr = Math.hypot(x, y), th = fromRadRaw(Math.atan2(y, x), this.ctx.angle);
+        return { pair: [rr, th], labels: ['r', 'θ'] };
+      }
+      var rad = toRadRaw(y, this.ctx.angle);
+      return { pair: [x * Math.cos(rad), x * Math.sin(rad)], labels: ['X', 'Y'] };
+    }
+    if (name === 'randInt' || name === 'RanInt') {
+      var a2 = argFn();
+      var lo = Math.ceil(num(a2[0])), hi = Math.floor(num(a2[1]));
+      return { re: lo + Math.floor(Math.random() * (hi - lo + 1)), im: 0 };
+    }
 
-    var tokens = tokenize(src);
-    if (!tokens.length) throw new CalcError('Syntax ERROR');
+    var a = argFn();
 
-    var parser = new Parser(tokens, ctx);
-    var value = parser.parseExpr();
-    if (parser.pos < parser.tokens.length) throw new CalcError('Syntax ERROR');
+    /* functions that must see the complex value itself */
+    var cArg = a[0];
+    switch (name) {
+      case 'Arg': return { re: fromRadRaw(C.arg(cArg), this.ctx.angle), im: 0 };
+      case 'Conjg': return { re: C.to(cArg).re, im: -C.to(cArg).im };
+      case 'Re': return { re: C.to(cArg).re, im: 0 };
+      case 'Im': return { re: C.to(cArg).im, im: 0 };
+      case 'Abs': case 'abs': return { re: C.abs(cArg), im: 0 };
+      default: break;
+    }
 
-    if (typeof value !== 'number' || isNaN(value)) throw new CalcError('Math ERROR');
-    if (!isFinite(value)) throw new CalcError('Math ERROR');
-    return value;
+    return MathLib.apply(name, a.map(num), this.ctx);
+  };
+
+  /* ============================================================
+     5. math library
+     ============================================================ */
+  function num(v) { return C.isC(v) ? v.re : v; }
+
+  function toRadRaw(v, unit) {
+    if (unit === 'rad') return v;
+    if (unit === 'grad') return v * Math.PI / 200;
+    return v * Math.PI / 180;
+  }
+  function fromRadRaw(v, unit) {
+    if (unit === 'rad') return v;
+    if (unit === 'grad') return v * 200 / Math.PI;
+    return v * 180 / Math.PI;
   }
 
-  /* ----------------------------------------------------------
-     Number formatting
-     ---------------------------------------------------------- */
-  function superscriptDigits(str) {
-    var map = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵',
-                '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '', '.': '·' };
-    return String(str).split('').map(function (ch) { return map[ch] || ch; }).join('');
+  function factorial(n) {
+    if (n < 0 || Math.abs(n - Math.round(n)) > 1e-9) throw mathError();
+    n = Math.round(n);
+    if (n > 170) throw mathError();
+    var r = 1;
+    for (var k = 2; k <= n; k++) r *= k;
+    return r;
   }
 
-  function fractionOf(x) {
-    // convert decimal to a friendly fraction if reasonable
-    if (!isFinite(x) || Math.abs(x) > 1e7) return null;
-    var sign = x < 0 ? -1 : 1;
-    var v = Math.abs(x);
-    var den = 1;
-    while (Math.abs(v - Math.round(v)) > 1e-10 && den < 1e6) {
-      v *= 10; den *= 10;
-      v = Math.round(v * 1e10) / 1e10;
-    }
-    var num = Math.round(v);
-    var g = gcd2(num, den);
-    num /= g; den /= g;
-    if (den === 1) return null;
-    if (den > 10000) return null;
-    return { n: sign * num, d: den };
+  function nCr(n, r) {
+    n = Math.round(n); r = Math.round(r);
+    if (n < 0 || r < 0 || r > n) throw mathError();
+    r = Math.min(r, n - r);
+    var res = 1;
+    for (var k = 1; k <= r; k++) { res = res * (n - r + k) / k; }
+    return Math.round(res * 1e9) / 1e9;
   }
 
-  function formatNumber(value, opts) {
-    var mode = (opts && opts.format) || 'norm';
-    var digits = (opts && opts.digits) || 10;
+  function nPr(n, r) {
+    n = Math.round(n); r = Math.round(r);
+    if (n < 0 || r < 0 || r > n) throw mathError();
+    var res = 1;
+    for (var k = 0; k < r; k++) res *= (n - k);
+    return res;
+  }
 
-    if (value === 0) value = 0; // normalise -0
+  function gcd2(a, b) {
+    a = Math.abs(Math.round(a)); b = Math.abs(Math.round(b));
+    while (b) { var t = b; b = a % b; a = t; }
+    return a;
+  }
 
-    if (mode === 'fix2' || mode === 'fix4' || mode === 'fix6') {
-      var d = mode === 'fix2' ? 2 : mode === 'fix4' ? 4 : 6;
-      return value.toFixed(d);
+  var MathLib = {
+    apply: function (name, args, ctx) {
+      var x = args[0], y = args[1], z = args[2];
+      switch (name) {
+        case 'sin': return { re: trig(Math.sin, x, ctx.angle), im: 0 };
+        case 'cos': return { re: trig(Math.cos, x, ctx.angle), im: 0 };
+        case 'tan': {
+          var c = Math.cos(toRadRaw(x, ctx.angle));
+          if (Math.abs(c) < 1e-14) throw mathError();
+          return { re: trig(Math.tan, x, ctx.angle), im: 0 };
+        }
+        case 'sin⁻¹': case 'asin': return { re: invTrig(Math.asin, x, ctx.angle), im: 0 };
+        case 'cos⁻¹': case 'acos': return { re: invTrig(Math.acos, x, ctx.angle), im: 0 };
+        case 'tan⁻¹': case 'atan': return { re: invTrig(Math.atan, x, ctx.angle), im: 0 };
+        case 'sinh': return { re: Math.sinh(x), im: 0 };
+        case 'cosh': return { re: Math.cosh(x), im: 0 };
+        case 'tanh': return { re: Math.tanh(x), im: 0 };
+        case 'sinh⁻¹': case 'asinh': return { re: Math.asinh(x), im: 0 };
+        case 'cosh⁻¹': case 'acosh': return { re: Math.acosh(x), im: 0 };
+        case 'tanh⁻¹': case 'atanh': return { re: Math.atanh(x), im: 0 };
+
+        case 'log': case 'lg':
+          if (args.length === 2) {
+            if (x <= 0 || y <= 0) throw mathError();
+            return { re: Math.log(y) / Math.log(x), im: 0 };
+          }
+          if (x <= 0) throw mathError();
+          return { re: Math.log10(x), im: 0 };
+        case 'ln':
+          if (x <= 0) throw mathError();
+          return { re: Math.log(x), im: 0 };
+        case 'log₂':
+          if (x <= 0) throw mathError();
+          return { re: Math.log2(x), im: 0 };
+        case 'exp': return { re: Math.exp(x), im: 0 };
+
+        case 'sqrt': return C.clean(C.sqrt(x));
+        case 'cbrt': return { re: Math.cbrt(x), im: 0 };
+        case 'abs': case 'Abs': return { re: Math.abs(x), im: 0 };
+        case 'abs2': return { re: x * x, im: 0 };
+        case 'sign': return { re: Math.sign(x), im: 0 };
+        case 'floor': case 'int': return { re: Math.floor(x), im: 0 };
+        case 'ceil': return { re: Math.ceil(x), im: 0 };
+        case 'round': return { re: Math.round(x), im: 0 };
+        case 'frac': return { re: x - Math.trunc(x), im: 0 };
+        case 'rand': return { re: Math.random(), im: 0 };
+
+        case 'nCr': return { re: nCr(x, y), im: 0 };
+        case 'nPr': return { re: nPr(x, y), im: 0 };
+        case 'gcd': return { re: gcd2(x, y), im: 0 };
+        case 'lcm': return { re: Math.abs(Math.round(x) * Math.round(y)) / (gcd2(x, y) || 1), im: 0 };
+        case 'min': return { re: Math.min.apply(null, args), im: 0 };
+        case 'max': return { re: Math.max.apply(null, args), im: 0 };
+
+        default: throw syntaxError();
+      }
+    },
+    nCr: nCr, nPr: nPr, gcd: gcd2, factorial: factorial
+  };
+
+  function trig(fn, v, unit) {
+    var r = fn(toRadRaw(v, unit));
+    if (Math.abs(r) < 1e-13) r = 0;
+    if (Math.abs(Math.abs(r) - 1) < 1e-13) r = Math.sign(r);
+    return r;
+  }
+  function invTrig(fn, v, unit) {
+    var r = fn(v);
+    if (isNaN(r)) throw mathError();
+    return fromRadRaw(r, unit);
+  }
+
+  /* ============================================================
+     5b. structural expression splitters for ∑ ∫ d/dx
+     ============================================================ */
+  function splitTopLevel(src, sep) {
+    var depth = 0, out = [], cur = '';
+    for (var i = 0; i < src.length; i++) {
+      var c = src[i];
+      if (c === '(' || c === '[') depth++;
+      else if (c === ')' || c === ']') depth > 0 && depth--;
+      if (c === sep && depth === 0) { out.push(cur); cur = ''; continue; }
+      cur += c;
     }
-
-    var abs = Math.abs(value);
-    if (mode === 'sci' || abs >= 1e10 || (abs > 0 && abs < 1e-9)) {
-      var exp = value.toExponential(9);
-      var parts = exp.split('e');
-      var mant = trimZeros(parts[0]);
-      var e = parseInt(parts[1], 10);
-      return mant + '×10' + superscriptDigits(e);
-    }
-
-    // norm
-    var rounded = roundSignificant(value, digits);
-    if (Number.isInteger(rounded) && Math.abs(rounded) < 1e15) {
-      return String(rounded);
-    }
-    var out = trimZeros(rounded.toFixed(Math.max(0, digits - 1 - Math.floor(Math.log10(abs + 1e-300)))));
+    out.push(cur);
     return out;
   }
 
-  function roundSignificant(v, sig) {
-    if (v === 0) return 0;
-    var d = Math.ceil(Math.log10(Math.abs(v)));
-    var power = sig - d;
-    var mag = Math.pow(10, power);
-    return Math.round(v * mag) / mag;
+  function extractCallBody(src, startIdx) {
+    // src[startIdx] === '(' ; returns {body, end}
+    var depth = 0;
+    for (var i = startIdx; i < src.length; i++) {
+      if (src[i] === '(') depth++;
+      else if (src[i] === ')') {
+        depth--;
+        if (depth === 0) return { body: src.slice(startIdx + 1, i), end: i };
+      }
+    }
+    return null;
   }
 
-  function trimZeros(s) {
-    if (s.indexOf('.') === -1) return s;
-    return s.replace(/0+$/, '').replace(/\.$/, '');
+  /* ============================================================
+     6. calculus
+     ============================================================ */
+  function evaluateAst(expr, ctx, overrides) {
+    var localVars = Object.assign({}, ctx.vars, overrides || {});
+    var tokens = tokenize(expr);
+    var parser = new Parser(tokens, {
+      angle: ctx.angle,
+      ans: ctx.ans,
+      vars: localVars,
+      complex: ctx.complex,
+      tol: ctx.tol
+    });
+    var val = parser.parseExpr();
+    if (parser.p < parser.tk.length) throw syntaxError();
+    return val;
   }
 
-  function formatFraction(fr) {
+  function isComplex(v) { return C.isC(v) && Math.abs(v.im) > 1e-14; }
+
+  /* derivative (central difference with Richardson extrapolation) */
+  function derivative(expr, x, ctx) {
+    var h = 1e-5 * Math.max(1, Math.abs(x));
+    function f(t) {
+      var v = evaluateAst(expr, ctx, { x: t });
+      if (isComplex(v)) throw mathError();
+      return num(v);
+    }
+    var a = (f(x + h) - f(x - h)) / (2 * h);
+    var b = (f(x + h / 2) - f(x - h / 2)) / h;
+    return (4 * b - a) / 3;
+  }
+
+  /* Simpson's rule composite integral */
+  function integrate(expr, a, b, ctx, n) {
+    n = n || 1000;
+    if (n % 2) n++;
+    var h = (b - a) / n;
+    function f(t) {
+      var v = evaluateAst(expr, ctx, { x: t });
+      if (isComplex(v)) throw mathError();
+      return num(v);
+    }
+    var sum = f(a) + f(b);
+    for (var i = 1; i < n; i++) {
+      sum += (i % 2 ? 4 : 2) * f(a + i * h);
+    }
+    var r = sum * h / 3;
+    if (isNaN(r) || !isFinite(r)) throw mathError();
+    return r;
+  }
+
+  /* Σ  and  Π (product) */
+  function summation(expr, start, end, ctx) {
+    start = Math.round(start); end = Math.round(end);
+    if (end < start) throw mathError();
+    if (end - start > 100000) throw mathError();
+    var total = 0;
+    var cmp = ctx.complex;
+    for (var k = start; k <= end; k++) {
+      var v = evaluateAst(expr, ctx, { x: k });
+      total = cmp ? C.add(total, v) : total + num(v);
+    }
+    return total;
+  }
+
+  function productOf(expr, start, end, ctx) {
+    start = Math.round(start); end = Math.round(end);
+    if (end < start) throw mathError();
+    var p = 1;
+    for (var k = start; k <= end; k++) p *= num(evaluateAst(expr, ctx, { x: k }));
+    return p;
+  }
+
+  /* pre-process ∑(...) ∫(...) d/dx(...) forms into numbers */
+  function expandStructural(src, ctx) {
+    var changed = true, guard = 0;
+    while (changed && guard++ < 40) {
+      changed = false;
+
+      /* ∑(expr, from, to) */
+      var m = /∑\(/.exec(src);
+      if (m) {
+        var body = extractCallBody(src, m.index + 1);
+        if (!body) throw syntaxError();
+        var parts = splitTopLevel(body.body, ',');
+        if (parts.length < 3) throw syntaxError();
+        var to = num(evaluateAst(parts[2], ctx));
+        var from = num(evaluateAst(parts[1], ctx));
+        var val = summation(parts[0], from, to, ctx);
+        src = src.slice(0, m.index) + '(' + formatValueInline(val) + ')' + src.slice(body.end + 1);
+        changed = true;
+        continue;
+      }
+
+      /* Π(expr, from, to) */
+      m = /Π\(/.exec(src);
+      if (m) {
+        var b2 = extractCallBody(src, m.index + 1);
+        if (!b2) throw syntaxError();
+        var p2 = splitTopLevel(b2.body, ',');
+        if (p2.length < 3) throw syntaxError();
+        var v2 = productOf(p2[0], num(evaluateAst(p2[1], ctx)), num(evaluateAst(p2[2], ctx)), ctx);
+        src = src.slice(0, m.index) + '(' + formatValueInline(v2) + ')' + src.slice(b2.end + 1);
+        changed = true;
+        continue;
+      }
+
+      /* ∫(expr, a, b) or ∫(expr, a, b, tol) */
+      m = /∫\(/.exec(src);
+      if (m) {
+        var b3 = extractCallBody(src, m.index + 1);
+        if (!b3) throw syntaxError();
+        var p3 = splitTopLevel(b3.body, ',');
+        if (p3.length < 3) throw syntaxError();
+        var lo = num(evaluateAst(p3[1], ctx));
+        var hi = num(evaluateAst(p3[2], ctx));
+        var iv = integrate(p3[0], lo, hi, ctx, 1000);
+        src = src.slice(0, m.index) + '(' + formatValueInline(iv) + ')' + src.slice(b3.end + 1);
+        changed = true;
+        continue;
+      }
+
+      /* d/dx(expr, a) */
+      m = /d\/dx\(/.exec(src);
+      if (m) {
+        var b4 = extractCallBody(src, m.index + 4);
+        if (!b4) throw syntaxError();
+        var p4 = splitTopLevel(b4.body, ',');
+        if (p4.length < 2) throw syntaxError();
+        var dv = derivative(p4[0], num(evaluateAst(p4[1], ctx)), ctx);
+        src = src.slice(0, m.index) + '(' + formatValueInline(dv) + ')' + src.slice(b4.end + 1);
+        changed = true;
+        continue;
+      }
+    }
+    return src;
+  }
+
+  function formatValueInline(v) {
+    var n = C.isC(v) ? v.re : v;
+    return '(' + Number(n).toPrecision(15) + ')';
+  }
+
+  /* ============================================================
+     7. evaluate + solve
+     ============================================================ */
+  function autoClose(src) {
+    var open = 0;
+    for (var i = 0; i < src.length; i++) {
+      if (src[i] === '(') open++;
+      else if (src[i] === ')') open--;
+    }
+    while (open-- > 0) src += ')';
+    return src;
+  }
+
+  function makeCtx(options) {
+    var o = options || {};
+    return {
+      angle: o.angle || 'deg',
+      ans: o.ans || 0,
+      vars: o.vars || {},
+      complex: !!o.complex,
+      tol: o.tol || 1e-9
+    };
+  }
+
+  function evaluate(expression, options) {
+    var ctx = makeCtx(options);
+    var src = String(expression == null ? '' : expression).trim();
+    if (!src) throw syntaxError();
+    src = autoClose(src);
+    src = expandStructural(src, ctx);
+
+    var tokens = tokenize(src);
+    if (!tokens.length) throw syntaxError();
+
+    var parser = new Parser(tokens, ctx);
+    var value = parser.parseExpr();
+    if (parser.p < parser.tk.length) throw syntaxError();
+
+    if (C.isPair(value)) return value;
+    if (!C.isC(value)) value = { re: value, im: 0 };
+    if (!isFinite(value.re) || isNaN(value.re)) throw mathError();
+    if (!isFinite(value.im) || isNaN(value.im)) throw mathError();
+
+    value = C.clean(value);
+    if (!ctx.complex && Math.abs(value.im) > 1e-12) throw mathError();
+    return value;
+  }
+
+  /* solve f(x)=0 starting at guess (Newton + bisection fallback) */
+  function solve(expression, guess, ctx, variable) {
+    var v = variable || 'x';
+    var eq = String(expression);
+    var target = eq;
+    var eqIdx = eq.indexOf('=');
+    function f(t) {
+      var val;
+      if (eqIdx >= 0) {
+        var lhs = eq.slice(0, eqIdx), rhs = eq.slice(eqIdx + 1);
+        val = num(evaluateAst(lhs, ctx, obj(v, t))) - num(evaluateAst(rhs, ctx, obj(v, t)));
+      } else {
+        val = num(evaluateAst(target, ctx, obj(v, t)));
+      }
+      return val;
+    }
+    var x = guess === undefined ? 1 : guess;
+    for (var i = 0; i < 200; i++) {
+      var fx = f(x);
+      if (Math.abs(fx) < 1e-12) return x;
+      var h = 1e-6 * Math.max(1, Math.abs(x));
+      var dfx = (f(x + h) - f(x - h)) / (2 * h);
+      if (!isFinite(dfx) || Math.abs(dfx) < 1e-14) break;
+      var step = fx / dfx;
+      if (!isFinite(step)) break;
+      x -= step;
+      if (Math.abs(step) < 1e-12) return x;
+    }
+    /* bisection scan fallback */
+    var ranges = [[-1e6, 1e6], [-1e4, 1e4], [-100, 100], [-10, 10], [-1, 1]];
+    for (var r = 0; r < ranges.length; r++) {
+      var a = ranges[r][0], b = ranges[r][1], N = 800;
+      var pa = f(a), pb = f(b);
+      for (var k = 1; k <= N; k++) {
+        var xx = a + (b - a) * k / N;
+        var px = f(xx);
+        if (!isFinite(pa) || !isFinite(px)) { pa = px; continue; }
+        if (pa === 0) return xx - (b - a) / N;
+        if (pa * px < 0) {
+          var lo = a + (b - a) * (k - 1) / N, hi = xx;
+          for (var it = 0; it < 120; it++) {
+            var mid = (lo + hi) / 2;
+            var pm = f(mid);
+            if (Math.abs(pm) < 1e-14) return mid;
+            if (pa * pm < 0) hi = mid; else { lo = mid; pa = pm; }
+          }
+          return (lo + hi) / 2;
+        }
+        pa = px;
+      }
+    }
+    throw new CalcError('Cannot Solve');
+  }
+
+  function obj(k, v) { var o = {}; o[k] = v; return o; }
+
+  /* ============================================================
+     8. matrices & vectors
+     ============================================================ */
+  var Matrix = {
+    add: function (A, B) {
+      return A.map(function (row, i) { return row.map(function (v, j) { return v + B[i][j]; }); });
+    },
+    sub: function (A, B) {
+      return A.map(function (row, i) { return row.map(function (v, j) { return v - B[i][j]; }); });
+    },
+    mul: function (A, B) {
+      var n = A.length, m = B[0].length, p = B.length;
+      var out = [];
+      for (var i = 0; i < n; i++) {
+        out[i] = [];
+        for (var j = 0; j < m; j++) {
+          var s = 0;
+          for (var k = 0; k < p; k++) s += A[i][k] * B[k][j];
+          out[i][j] = s;
+        }
+      }
+      return out;
+    },
+    scalar: function (A, s) {
+      return A.map(function (row) { return row.map(function (v) { return v * s; }); });
+    },
+    det: function (A) {
+      var n = A.length;
+      if (n === 1) return A[0][0];
+      if (n === 2) return A[0][0] * A[1][1] - A[0][1] * A[1][0];
+      var d = 0;
+      for (var j = 0; j < n; j++) {
+        var minor = [];
+        for (var i = 1; i < n; i++) {
+          var row = [];
+          for (var k = 0; k < n; k++) if (k !== j) row.push(A[i][k]);
+          minor.push(row);
+        }
+        d += ((j % 2) ? -1 : 1) * A[0][j] * Matrix.det(minor);
+      }
+      return d;
+    },
+    inv: function (A) {
+      var n = A.length;
+      var det = Matrix.det(A);
+      if (Math.abs(det) < 1e-14) throw new CalcError('Math ERROR');
+      var out = [];
+      for (var i = 0; i < n; i++) {
+        out[i] = [];
+        for (var j = 0; j < n; j++) {
+          var minor = [];
+          for (var r = 0; r < n; r++) {
+            if (r === i) continue;
+            var row = [];
+            for (var c = 0; c < n; c++) if (c !== j) row.push(A[r][c]);
+            minor.push(row);
+          }
+          out[i][j] = ((i + j) % 2 ? -1 : 1) * Matrix.det(minor) / det;
+        }
+      }
+      return out;
+    },
+    transpose: function (A) {
+      var out = [];
+      for (var j = 0; j < A[0].length; j++) {
+        out[j] = [];
+        for (var i = 0; i < A.length; i++) out[j][i] = A[i][j];
+      }
+      return out;
+    },
+    identity: function (n) {
+      var out = [];
+      for (var i = 0; i < n; i++) {
+        out[i] = [];
+        for (var j = 0; j < n; j++) out[i][j] = i === j ? 1 : 0;
+      }
+      return out;
+    },
+    trace: function (A) {
+      var s = 0;
+      for (var i = 0; i < A.length; i++) s += A[i][i];
+      return s;
+    },
+    clone: function (A) { return A.map(function (r) { return r.slice(); }); },
+    /** Gauss-Jordan solve for n unknowns */
+    solveLinear: function (A, b) {
+      var n = A.length;
+      var M = A.map(function (row, i) { return row.concat([b[i]]); });
+      for (var col = 0; col < n; col++) {
+        var piv = col;
+        for (var r = col + 1; r < n; r++) {
+          if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+        }
+        if (Math.abs(M[piv][col]) < 1e-14) return null;
+        var t = M[col]; M[col] = M[piv]; M[piv] = t;
+        var pv = M[col][col];
+        for (var c2 = col; c2 <= n; c2++) M[col][c2] /= pv;
+        for (var r2 = 0; r2 < n; r2++) {
+          if (r2 === col) continue;
+          var f = M[r2][col];
+          if (!f) continue;
+          for (var c3 = col; c3 <= n; c3++) M[r2][c3] -= f * M[col][c3];
+        }
+      }
+      return M.map(function (row) { return row[n]; });
+    }
+  };
+
+  /* ============================================================
+     9. statistics / regression / distributions
+     ============================================================ */
+  var Stat = {
+    summary: function (values) {
+      var n = values.length;
+      if (!n) throw mathError();
+      var sum = 0, sq = 0;
+      for (var i = 0; i < n; i++) { sum += values[i]; sq += values[i] * values[i]; }
+      var mean = sum / n;
+      var ss = sq - n * mean * mean;
+      var varP = ss / n;
+      var varS = n > 1 ? ss / (n - 1) : 0;
+      return {
+        n: n, sum: sum, sumSq: sq, mean: mean,
+        varP: varP, varS: varS,
+        sdP: Math.sqrt(varP), sdS: Math.sqrt(varS),
+        min: Math.min.apply(null, values),
+        max: Math.max.apply(null, values),
+        median: Stat.median(values)
+      };
+    },
+    median: function (values) {
+      var a = values.slice().sort(function (x, y) { return x - y; });
+      var n = a.length;
+      if (!n) throw mathError();
+      return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2;
+    },
+    mode: function (values) {
+      var counts = {}, best = null, bestCount = 0;
+      values.forEach(function (v) {
+        counts[v] = (counts[v] || 0) + 1;
+        if (counts[v] > bestCount) { bestCount = counts[v]; best = v; }
+      });
+      return best;
+    },
+    q1: function (values) {
+      var a = values.slice().sort(function (x, y) { return x - y; });
+      var n = a.length;
+      var half = a.slice(0, Math.floor(n / 2));
+      return Stat.median(half);
+    },
+    q3: function (values) {
+      var a = values.slice().sort(function (x, y) { return x - y; });
+      var n = a.length;
+      var half = a.slice(Math.ceil(n / 2));
+      return Stat.median(half);
+    },
+    linearRegression: function (xs, ys) {
+      var n = xs.length;
+      if (n !== ys.length || n < 2) throw mathError();
+      var sx = 0, sy = 0, sxy = 0, sxx = 0, syy = 0;
+      for (var i = 0; i < n; i++) {
+        sx += xs[i]; sy += ys[i];
+        sxy += xs[i] * ys[i]; sxx += xs[i] * xs[i]; syy += ys[i] * ys[i];
+      }
+      var denom = n * sxx - sx * sx;
+      var a = (n * sxy - sx * sy) / denom;
+      var b = (sy - a * sx) / n;
+      var r = (n * sxy - sx * sy) / Math.sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
+      return { a: a, b: b, r: r, r2: r * r };
+    },
+    quadraticRegression: function (xs, ys) {
+      // solve normal equations for y = a x² + b x + c
+      var n = xs.length;
+      var s = [0, 0, 0, 0, 0], t = [0, 0, 0];
+      for (var i = 0; i < n; i++) {
+        var x = xs[i], y = ys[i];
+        s[0] += Math.pow(x, 4); s[1] += Math.pow(x, 3); s[2] += x * x;
+        s[3] += x; s[4] += 1;
+        t[0] += y * x * x; t[1] += y * x; t[2] += y;
+      }
+      var A = [[s[0], s[1], s[2]], [s[1], s[2], s[3]], [s[2], s[3], s[4]]];
+      var sol = Matrix.solveLinear(A, t);
+      if (!sol) throw mathError();
+      return { a: sol[0], b: sol[1], c: sol[2] };
+    },
+    erf: function (x) {
+      // Abramowitz & Stegun 7.1.26
+      var s = Math.sign(x); x = Math.abs(x);
+      var t = 1 / (1 + 0.3275911 * x);
+      var y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+      return s * y;
+    },
+    normalPdf: function (x, mu, sd) {
+      return Math.exp(-0.5 * Math.pow((x - mu) / sd, 2)) / (sd * Math.sqrt(2 * Math.PI));
+    },
+    normalCdf: function (x, mu, sd) {
+      return 0.5 * (1 + Stat.erf((x - mu) / (sd * Math.SQRT2)));
+    },
+    normalInv: function (p) {
+      // Acklam's inverse normal CDF
+      var a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.3577518672690, -30.66479806614716, 2.506628277459239];
+      var b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572];
+      var c = [-0.007784894002430293, -0.3223964580411365, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+      var d = [0.007784695709041462, 0.3224671290700398, 2.445134137142996, 3.754408661907416];
+      var pl = 0.02425, q, r;
+      if (p <= 0 || p >= 1) throw mathError();
+      if (p < pl) {
+        q = Math.sqrt(-2 * Math.log(p));
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+               ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+      }
+      if (p > 1 - pl) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+                ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+      }
+      q = p - 0.5; r = q * q;
+      return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+             (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+    },
+    tCdf: function (t, df) {
+      // via incomplete beta (continued fraction, Lentz)
+      var x = df / (df + t * t);
+      var p = 0.5 * Stat.betaInc(x, df / 2, 0.5);
+      return t > 0 ? 1 - p : p;
+    },
+    betaInc: function (x, a, b) {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      var lbeta = Stat.logGamma(a) + Stat.logGamma(b) - Stat.logGamma(a + b);
+      var front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lbeta) / a;
+      var f = 1, c = 1, d = 0;
+      for (var i = 0; i <= 200; i++) {
+        var m = Math.floor(i / 2);
+        var num;
+        if (i === 0) num = 1;
+        else if (i % 2 === 0) num = (m * (b - m) * x) / ((a + 2 * m - 1) * (a + 2 * m));
+        else num = -((a + m) * (a + b + m) * x) / ((a + 2 * m) * (a + 2 * m + 1));
+        d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30;
+        d = 1 / d;
+        c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30;
+        var cd = c * d;
+        f *= cd;
+        if (Math.abs(cd - 1) < 1e-12) break;
+      }
+      var res = front * (f - 1);
+      return x < (a + 1) / (a + b + 2) ? res : 1 - Stat.betaInc(1 - x, b, a);
+    },
+    logGamma: function (z) {
+      var g = [76.18009172947146, -86.50532032941677, 24.01409824083091,
+               -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
+      var x = z, y = z, tmp = x + 5.5;
+      tmp -= (x + 0.5) * Math.log(tmp);
+      var ser = 1.000000000190015;
+      for (var j = 0; j < 6; j++) ser += g[j] / ++y;
+      return -tmp + Math.log(2.5066282746310005 * ser / x);
+    }
+  };
+
+  /* ============================================================
+     10. base-N
+     ============================================================ */
+  var BaseN = {
+    toDecimal: function (str, base) {
+      var s = String(str).replace(/\s/g, '').toUpperCase();
+      var neg = s[0] === '-';
+      if (neg) s = s.slice(1);
+      if (!s) throw syntaxError();
+      var v = 0;
+      for (var i = 0; i < s.length; i++) {
+        var d = parseInt(s[i], 16);
+        if (isNaN(d) || d >= base) throw new CalcError('Base ERROR');
+        v = v * base + d;
+      }
+      return neg ? -v : v;
+    },
+    fromDecimal: function (n, base) {
+      n = Math.trunc(n);
+      var neg = n < 0;
+      n = Math.abs(n);
+      if (n === 0) return '0';
+      var digits = '0123456789ABCDEF';
+      var out = '';
+      while (n > 0) {
+        out = digits[n % base] + out;
+        n = Math.floor(n / base);
+      }
+      return (neg ? '-' : '') + out;
+    }
+  };
+
+  /* ============================================================
+     11. fractions
+     ============================================================ */
+  function fractionOf(x, maxDen) {
+    maxDen = maxDen || 1e5;
+    if (!isFinite(x)) return null;
+    var sign = x < 0 ? -1 : 1;
+    var v = Math.abs(x);
+    // best rational approximation via continued fractions
+    var h1 = 1, h0 = 0, k1 = 0, k0 = 1, b = v;
+    for (var i = 0; i < 64; i++) {
+      var a = Math.floor(b);
+      var h2 = a * h1 + h0, k2 = a * k1 + k0;
+      if (k2 > maxDen) break;
+      h0 = h1; h1 = h2; k0 = k1; k1 = k2;
+      if (Math.abs(v - h1 / k1) < 1e-12) break;
+      var frac = b - a;
+      if (frac < 1e-12) break;
+      b = 1 / frac;
+    }
+    if (k1 === 0) return null;
+    if (Math.abs(v - h1 / k1) > 1e-10) return null;
+    var g = gcd2(h1, k1);
+    var n = sign * h1 / g, d = k1 / g;
+    if (d === 1) return null;
+    return { n: n, d: d };
+  }
+
+  function fractionText(fr) {
     if (!fr) return null;
     if (fr.d === 1) return String(fr.n);
     if (Math.abs(fr.n) > fr.d) {
@@ -515,19 +1148,184 @@
     return fr.n + '/' + fr.d;
   }
 
-  /* exposed API */
-  global.MKJEngine = {
+  /* convert decimal to a π-multiple string when close to k·π/m */
+  function piFraction(x, tol) {
+    tol = tol || 1e-10;
+    var best = null;
+    for (var d = 1; d <= 12; d++) {
+      var k = x * d / Math.PI;
+      var rk = Math.round(k);
+      if (rk === 0) continue;
+      if (Math.abs(k - rk) < tol * 100) {
+        best = { k: rk, d: d };
+        break;
+      }
+    }
+    if (!best) return null;
+    var num = best.k, den = best.d;
+    var g = gcd2(num, den);
+    num /= g; den /= g;
+    if (den === 1) return (num === 1 ? 'π' : num + 'π');
+    var s = (num === 1 ? 'π' : num + 'π');
+    return s + '/' + den;
+  }
+
+  /* ============================================================
+     12. formatting
+     ============================================================ */
+  var SUPS = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵',
+               '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '.': '·' };
+
+  function superscript(str) {
+    return String(str).split('').map(function (c) { return SUPS[c] !== undefined ? SUPS[c] : c; }).join('');
+  }
+
+  function roundSig(v, sig) {
+    if (v === 0) return 0;
+    var d = Math.ceil(Math.log10(Math.abs(v)));
+    var p = sig - d;
+    var m = Math.pow(10, p);
+    return Math.round(v * m) / m;
+  }
+
+  function trimZeros(s) {
+    if (s.indexOf('.') === -1) return s;
+    s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s;
+  }
+
+  function formatValue(value, opts) {
+    var o = opts || {};
+    var mode = o.format || 'norm';
+    var complex = o.complex || false;
+
+    if (C.isPair(value)) {
+      var l = value.labels || ['x', 'y'];
+      return l[0] + '=' + formatReal(value.pair[0], mode, o) +
+             '  ' + l[1] + '=' + formatReal(value.pair[1], mode, o);
+    }
+
+    var v = C.isC(value) ? value : { re: value, im: 0 };
+
+    if (complex || Math.abs(v.im) > 1e-12) {
+      return formatComplex(v, o);
+    }
+    var x = v.re;
+    return formatReal(x, mode, o);
+  }
+
+  function formatReal(x, mode, o) {
+    if (x === 0) x = 0;
+    var digits = o.digits || 10;
+
+    if (mode === 'fix2') return Number(x).toFixed(2);
+    if (mode === 'fix3') return Number(x).toFixed(3);
+    if (mode === 'fix4') return Number(x).toFixed(4);
+
+    var abs = Math.abs(x);
+
+    if (mode === 'sci') {
+      var e = x.toExponential(9);
+      var parts = e.split('e');
+      return trimZeros(parts[0]) + '×10' + superscript(parseInt(parts[1], 10));
+    }
+
+    if (mode === 'eng') {
+      if (x === 0) return '0';
+      var exp3 = Math.floor(Math.log10(abs) / 3) * 3;
+      var mant = x / Math.pow(10, exp3);
+      return trimZeros(mant.toPrecision(10)) + '×10' + superscript(exp3);
+    }
+
+    if (mode === 'frac') {
+      var fr0 = fractionOf(x);
+      if (fr0) return fractionText(fr0);
+    }
+
+    if (mode === 'pi') {
+      var pf = piFraction(x);
+      if (pf) return pf;
+      var fr1 = fractionOf(x);
+      if (fr1) return fractionText(fr1);
+    }
+
+    if (abs >= 1e10 || (abs > 0 && abs < 1e-9)) {
+      var ex = x.toExponential(9).split('e');
+      return trimZeros(ex[0]) + '×10' + superscript(parseInt(ex[1], 10));
+    }
+
+    var rounded = roundSig(x, digits);
+    if (Number.isInteger(rounded) && Math.abs(rounded) < 1e15) return String(rounded);
+    var decimals = Math.max(0, digits - 1 - Math.floor(Math.log10(abs + 1e-300)));
+    return trimZeros(rounded.toFixed(Math.min(decimals, 12)));
+  }
+
+  function formatComplex(z, o) {
+    var mode = o.format || 'norm';
+    var polar = o.complexFormat === 'polar';
+    var re = Math.abs(z.re) < 1e-12 ? 0 : z.re;
+    var im = Math.abs(z.im) < 1e-12 ? 0 : z.im;
+
+    if (polar) {
+      var r = Math.hypot(re, im);
+      var th = fromRadRaw(Math.atan2(im, re), o.angle || 'deg');
+      return formatReal(r, mode, o) + '∠' + formatReal(th, mode, o);
+    }
+
+    if (im === 0) return formatReal(re, mode, o);
+    if (re === 0) {
+      if (im === 1) return 'i';
+      if (im === -1) return '-i';
+      return formatReal(im, mode, o) + 'i';
+    }
+    var imTxt = (im === 1 ? '' : im === -1 ? '-' : formatReal(im, mode, o));
+    return formatReal(re, mode, o) + (im > 0 ? '+' : '') + imTxt + 'i';
+  }
+
+  /* ============================================================
+     EXTERNALS
+     ============================================================ */
+  function inv(x) { return 1 / x; }
+
+  var API = {
+    /* core */
     evaluate: evaluate,
-    formatNumber: formatNumber,
-    fractionOf: fractionOf,
-    formatFraction: formatFraction,
-    superscriptDigits: superscriptDigits,
-    CalcError: CalcError,
+    evaluateAst: evaluateAst,
     tokenize: tokenize,
-    toRad: toRad,
-    clean: clean,
+    C: C, num: num, isComplex: isComplex,
+    CalcError: CalcError,
+    CONST: CONST, PHYS: PHYS,
+    toRad: toRadRaw, fromRad: fromRadRaw,
+
+    /* calculus */
+    derivative: derivative,
+    integrate: integrate,
+    summation: summation,
+    productOf: productOf,
+    solve: solve,
+
+    /* collections */
+    Matrix: Matrix,
+    Stat: Stat,
+    BaseN: BaseN,
+
+    /* formatting */
+    formatValue: formatValue,
+    formatNumber: function (v, o) { return formatValue(v, o || {}); },
+    formatComplex: formatComplex,
+    fractionOf: fractionOf,
+    fractionText: fractionText,
+    piFraction: piFraction,
+    superscript: superscript,
+
+    /* misc */
+    factorial: factorial,
+    nCr: nCr,
+    nPr: nPr,
     gcd: gcd2,
-    factorial: factorial
+    inv: inv
   };
 
-})(window);
+  global.MKJEngine = API;
+
+})(typeof window !== 'undefined' ? window : this);

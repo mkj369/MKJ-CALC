@@ -3,154 +3,148 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<meta name="theme-color" content="#0e1013" />
-<title>MKJ CALC</title>
+<meta name="theme-color" content="#0b0e12" />
+<title>MKJ CALC — Scientific Calculator</title>
 <link rel="stylesheet" href="css/style.css" />
 </head>
-<body>
+<body data-view="home">
 
-<div class="app">
+<div class="app" id="app">
 
-  <!-- ===== HEADER / BRAND ===== -->
-  <header class="topbar">
-    <div class="brand">
+  <!-- ============================================================
+       VIEW 1 — brand + model picker
+       ============================================================ -->
+  <section class="view view-home" id="viewHome">
+    <header class="hero">
       <div class="brand-mark">MKJ</div>
-      <div class="brand-text">
-        <h1>MKJ <span>CALC</span></h1>
-        <p class="tagline">Scientific Calculator Series</p>
+      <div>
+        <h1 class="hero-title">MKJ <span>CALC</span></h1>
+        <p class="hero-sub">Scientific Calculator Series</p>
       </div>
+    </header>
+
+    <p class="pick-label">Choose your calculator</p>
+
+    <div class="model-cards" id="modelCards"><!-- built by JS --></div>
+
+    <div class="home-foot">
+      <span>12 modes · 3 models</span>
+      <span>© MKJ CALC</span>
     </div>
+  </section>
 
-    <div class="model-switch" id="modelSwitch" role="tablist" aria-label="Model">
-      <button class="model-btn" data-model="esplus" role="tab">991 ES Plus</button>
-      <button class="model-btn" data-model="explus" role="tab">991 EX Plus</button>
-      <button class="model-btn" data-model="cw"     role="tab">991 CW</button>
-    </div>
-  </header>
-
-  <!-- ===== SECONDARY ACTIONS (SHIFT / ALPHA / SETUP) ===== -->
-  <div class="quickbar">
-    <button class="chip" id="btnHelp">ⓘ Help</button>
-    <button class="chip" id="btnDegRad">DEG</button>
-    <button class="chip" id="btnHistory">🕘 History</button>
-    <button class="chip" id="btnSetup">⚙ Setup</button>
-  </div>
-
-  <!-- ===== CALCULATOR BODY ===== -->
-  <main class="calc-shell" id="calcShell">
-
-    <!-- physical top plate -->
-    <div class="plate">
-      <div class="plate-brand">
-        <span class="plate-model" id="plateModel">MKJ-991ES PLUS</span>
-        <span class="plate-sub" id="plateSub">NATURAL DISPLAY</span>
+  <!-- ============================================================
+       VIEW 2 — mode home
+       ============================================================ -->
+  <section class="view view-modes" id="viewModes" hidden>
+    <header class="bar">
+      <button class="bar-btn" id="backToHome" aria-label="Change model">‹</button>
+      <div class="bar-title">
+        <b id="barModel">MKJ-991ES PLUS</b>
+        <span>Select a mode</span>
       </div>
-      <div class="plate-badge" aria-hidden="true">
-        <span>MKJ</span>
-        <small>CALC</small>
-      </div>
-    </div>
+      <button class="bar-btn" id="openSettings2" aria-label="Settings">⚙</button>
+    </header>
 
-    <!-- screen -->
-    <section class="screen-wrap">
-      <div class="screen" id="screen">
-        <div class="screen-status">
-          <div class="flags" id="flags">
-            <span class="flag" data-flag="S">S</span>
-            <span class="flag" data-flag="A">A</span>
-            <span class="flag" data-flag="M">M</span>
-            <span class="flag" data-flag="STO">STO</span>
-            <span class="flag" data-flag="R">R</span>
-          </div>
-          <div class="status-right">
-            <span class="mode-label" id="modeLabel">COMP</span>
-            <span class="angle-label" id="angleLabel">D</span>
-          </div>
+    <div class="mode-grid" id="modeGrid"><!-- built by JS --></div>
+
+    <div class="quick-links">
+      <button class="chip" id="openHistory2">🕘 History</button>
+      <button class="chip" id="openVars2">𝑥 Variables</button>
+      <button class="chip" id="openHelp2">? Help</button>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       VIEW 3 — calculator / mode workspace
+       ============================================================ -->
+  <section class="view view-calc" id="viewCalc" hidden>
+    <header class="bar">
+      <button class="bar-btn" id="backToModes" aria-label="Back to modes">‹</button>
+      <div class="bar-title">
+        <b id="calcTitle">Calculate</b>
+        <span id="calcSubtitle">MKJ-991ES PLUS</span>
+      </div>
+      <button class="bar-btn" id="openSettings" aria-label="Settings">⚙</button>
+    </header>
+
+    <main class="calc-shell" id="calcShell">
+      <div class="plate">
+        <div class="plate-brand">
+          <span class="plate-model" id="plateModel">MKJ-991ES PLUS</span>
+          <span class="plate-sub" id="plateSub">NATURAL DISPLAY</span>
         </div>
-
-        <div class="expr-box">
-          <div class="expr" id="expr" aria-live="polite"></div>
-        </div>
-
-        <div class="result" id="result">0</div>
-        <div class="screen-hint" id="screenHint">Press a key to start</div>
+        <div class="plate-badge"><span>MKJ</span><small>CALC</small></div>
       </div>
-      <div class="screen-gloss" aria-hidden="true"></div>
-    </section>
 
-    <!-- keys -->
-    <section class="pad-area">
-      <div class="pad-scroll">
+      <!-- LCD -->
+      <section class="screen-wrap">
+        <div class="screen" id="screen">
+          <div class="screen-status">
+            <div class="flags" id="flags">
+              <span class="flag" data-flag="S">S</span>
+              <span class="flag" data-flag="A">A</span>
+              <span class="flag" data-flag="M">M</span>
+              <span class="flag" data-flag="STO">STO</span>
+              <span class="flag" data-flag="i">i</span>
+              <span class="flag" data-flag="R">R</span>
+            </div>
+            <div class="status-right">
+              <span class="mode-label" id="modeLabel">COMP</span>
+              <span class="angle-label" id="angleLabel">D</span>
+            </div>
+          </div>
+
+          <div class="expr-box"><div class="expr" id="expr"></div></div>
+          <div class="result" id="result">0</div>
+          <div class="screen-hint" id="screenHint">Press a key to start</div>
+        </div>
+        <div class="screen-gloss" aria-hidden="true"></div>
+      </section>
+
+      <!-- mode workspace (stat / matrix / table ...) -->
+      <div class="workspace" id="workspace" hidden></div>
+
+      <!-- keypad -->
+      <section class="pad-area" id="padArea">
         <div class="keypad" id="keypad"></div>
+      </section>
+
+      <div class="plate-foot">
+        <span id="footModel">MKJ CALC · 991 ES Plus</span>
+        <span class="foot-note">2-Way Power</span>
       </div>
-    </section>
+    </main>
+  </section>
 
-    <div class="plate-foot">
-      <span id="footModel">MKJ CALC · 991 ES Plus</span>
-      <span class="foot-note">2-Way Power</span>
-    </div>
-  </main>
-
-  <footer class="credit">MKJ CALC — for education &amp; practice</footer>
+  <footer class="credit" id="creditLine">MKJ CALC — independent scientific calculator</footer>
 </div>
 
-<!-- ===== PANELS ===== -->
+<!-- ============================================================
+     Overlays
+     ============================================================ -->
 <div class="overlay" id="overlay" hidden></div>
 
-<aside class="panel" id="panelHistory" hidden>
+<!-- generic sheet -->
+<aside class="panel" id="sheet" hidden>
   <div class="panel-head">
-    <h2>History</h2>
-    <button class="icon-btn" data-close>✕</button>
+    <h2 id="sheetTitle">Sheet</h2>
+    <button class="icon-btn" data-close aria-label="Close">✕</button>
   </div>
-  <div class="panel-body" id="historyList"></div>
-  <div class="panel-foot">
-    <button class="btn ghost" id="clearHistory">Clear all</button>
-  </div>
+  <div class="panel-body" id="sheetBody"></div>
+  <div class="panel-foot" id="sheetFoot"></div>
 </aside>
 
-<aside class="panel" id="panelSetup" hidden>
+<!-- catalog sheet -->
+<aside class="panel" id="panelCatalog" hidden>
   <div class="panel-head">
-    <h2>Setup</h2>
+    <h2>Catalog</h2>
     <button class="icon-btn" data-close>✕</button>
   </div>
-  <div class="panel-body">
-    <label class="field">
-      <span>Angle unit</span>
-      <select id="selAngle">
-        <option value="deg">Degree (D)</option>
-        <option value="rad">Radian (R)</option>
-        <option value="grad">Gradian (G)</option>
-      </select>
-    </label>
-    <label class="field">
-      <span>Number format</span>
-      <select id="selFormat">
-        <option value="norm">Norm (auto)</option>
-        <option value="fix2">Fix 2</option>
-        <option value="fix4">Fix 4</option>
-        <option value="sci">Sci (×10ⁿ)</option>
-      </select>
-    </label>
-    <label class="field">
-      <span>Theme</span>
-      <select id="selTheme">
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
-    </label>
-    <label class="field">
-      <span>Key click sound</span>
-      <select id="selSound">
-        <option value="on">On</option>
-        <option value="off">Off</option>
-      </select>
-    </label>
-    <div class="panel-note">
-      Tip: press <b>SHIFT</b> then a key to use the small yellow label above it.
-    </div>
-  </div>
+  <div class="panel-body" id="catalogBody"></div>
 </aside>
 
+<!-- variables sheet -->
 <aside class="panel" id="panelVars" hidden>
   <div class="panel-head">
     <h2 id="varsTitle">Variables</h2>
@@ -158,35 +152,106 @@
   </div>
   <div class="panel-body">
     <div class="vars-grid" id="varsGrid"></div>
-    <div class="panel-note" id="varsNote">Tap a variable to recall its value.</div>
+    <div class="panel-note" id="varsNote"></div>
   </div>
 </aside>
 
+<!-- history sheet -->
+<aside class="panel" id="panelHistory" hidden>
+  <div class="panel-head">
+    <h2>History</h2>
+    <button class="icon-btn" data-close>✕</button>
+  </div>
+  <div class="panel-body" id="historyList"></div>
+  <div class="panel-foot"><button class="btn ghost" id="clearHistory">Clear all</button></div>
+</aside>
+
+<!-- settings sheet -->
+<aside class="panel" id="panelSettings" hidden>
+  <div class="panel-head">
+    <h2>Settings</h2>
+    <button class="icon-btn" data-close>✕</button>
+  </div>
+  <div class="panel-body">
+    <label class="field"><span>Angle unit</span>
+      <select id="selAngle">
+        <option value="deg">Degree (D)</option>
+        <option value="rad">Radian (R)</option>
+        <option value="grad">Gradian (G)</option>
+      </select>
+    </label>
+    <label class="field"><span>Number format</span>
+      <select id="selFormat">
+        <option value="norm">Norm (auto)</option>
+        <option value="fix2">Fix 2</option>
+        <option value="fix3">Fix 3</option>
+        <option value="fix4">Fix 4</option>
+        <option value="sci">Sci (×10ⁿ)</option>
+        <option value="eng">Eng (engineering)</option>
+        <option value="frac">Fraction</option>
+        <option value="pi">π-form</option>
+      </select>
+    </label>
+    <label class="field"><span>Complex display</span>
+      <select id="selComplex">
+        <option value="rect">a + bi</option>
+        <option value="polar">r ∠ θ</option>
+      </select>
+    </label>
+    <label class="field"><span>Show fractions automatically</span>
+      <select id="selAutoFrac"><option value="on">On</option><option value="off">Off</option></select>
+    </label>
+    <label class="field"><span>Theme</span>
+      <select id="selTheme"><option value="dark">Dark</option><option value="light">Light</option></select>
+    </label>
+    <label class="field"><span>Key sound</span>
+      <select id="selSound"><option value="on">On</option><option value="off">Off</option></select>
+    </label>
+    <label class="field"><span>Haptic</span>
+      <select id="selHaptic"><option value="on">On</option><option value="off">Off</option></select>
+    </label>
+    <div class="panel-note">SHIFT দিয়ে হলুদ লেবেলের ফাংশন, ALPHA দিয়ে লাল লেবেলের ভেরিয়েবল। দীর্ঘ চাপে ক্যালকুলেটরের মডেল বদলানো যায়।</div>
+  </div>
+</aside>
+
+<!-- help sheet -->
 <aside class="panel" id="panelHelp" hidden>
   <div class="panel-head">
-    <h2>Quick help</h2>
+    <h2>Help</h2>
     <button class="icon-btn" data-close>✕</button>
   </div>
   <div class="panel-body help-body">
-    <h3>Models</h3>
+    <h3>Getting started</h3>
     <ul>
-      <li><b>991 ES Plus</b> — classic layout, natural display, S⇔D conversion.</li>
-      <li><b>991 EX Plus</b> — 4-line class display, MATRIX / VECTOR / CONST menu keys.</li>
-      <li><b>991 CW</b> — newer flat-pad design with a round HOME button.</li>
+      <li>প্রথমে মডেল বাছুন: <b>991 ES Plus</b>, <b>991 EX Plus</b>, <b>991 CW</b>.</li>
+      <li>তারপর mode বাছুন — Calculate, Complex, Statistics, Matrix, Vector, Equation, Base-N, Ratio, Table, Solve, Verify, Constants.</li>
     </ul>
-    <h3>Display</h3>
+    <h3>Keys</h3>
     <ul>
-      <li>Type an expression and press <b>=</b>.</li>
-      <li><b>S⇔D</b> swaps between fraction and decimal.</li>
-      <li><b>Ans</b> shows the last result on screen; <b>STO</b> then a variable stores it.</li>
-      <li><b>x10ˣ</b> enters an exponent of ten, <b>×10ˣ</b> for engineering-style entry.</li>
+      <li><b>SHIFT</b> → কী-এর উপরের হলুদ ফাংশন; <b>ALPHA</b> → লাল ভেরিয়েবল।</li>
+      <li><b>S⇔D</b> → দশমিক ↔ ভগ্নাংশ ↔ π-form।</li>
+      <li><b>CALC</b> → ভেরিয়েবলের মান বসিয়ে হিসাব। <b>SOLVE</b> → f(x)=0 এর root।</li>
+      <li><b>∫dx</b>, <b>d/dx</b>, <b>Σ</b>, <b>Π</b> কাজ করে; যেমন <code>∫(x^2,0,3)</code>, <code>∑(x^2,1,10)</code>।</li>
+      <li>ইমাজিনারি: <code>i</code> লিখুন — <code>(3+4i)*(1-2i)</code>.</li>
+      <li><b>MODE</b>/<b>MENU</b>/<b>HOME</b> → mode তালিকায় ফিরে যান।</li>
     </ul>
-    <h3>Keyboard</h3>
+    <h3>Physical keyboard</h3>
     <ul>
-      <li>0–9 <b>. + − * /</b> — literal keys</li>
-      <li><b>Enter</b> = equals, <b>Backspace</b> = DEL, <b>Esc</b> = AC</li>
-      <li><b>Shift+Enter</b> = S⇔D</li>
+      <li>সংখ্যা ও <b>+ − * / ^ ( )</b> সরাসরি; <b>Enter</b> = equals, <b>Backspace</b> = DEL, <b>Esc</b> = AC</li>
+      <li><b>Shift+Enter</b> = S⇔D, <b>↑ ↓</b> = history, <b>← →</b> = caret</li>
     </ul>
+  </div>
+</aside>
+
+<!-- CALC dialog -->
+<aside class="panel" id="panelCalc" hidden>
+  <div class="panel-head">
+    <h2>CALC — variable values</h2>
+    <button class="icon-btn" data-close>✕</button>
+  </div>
+  <div class="panel-body" id="calcVarsBody"></div>
+  <div class="panel-foot">
+    <button class="btn primary" id="calcRun">Calculate</button>
   </div>
 </aside>
 
@@ -194,6 +259,7 @@
 
 <script src="js/engine.js"></script>
 <script src="js/layouts.js"></script>
+<script src="js/modes.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

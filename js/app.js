@@ -1,19 +1,31 @@
 /* ============================================================
-   MKJ CALC — app controller
+   MKJ CALC — app controller v2
+   Router (home → modes → calculator) + input + evaluation
    ============================================================ */
 (function () {
   'use strict';
 
   var E = window.MKJEngine;
-  var L = window.MKJLayouts;
+  var LAY = window.MKJLayouts;
+  var MODES = window.MKJModes;
 
-  /* ---------------- state ---------------- */
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ------------------------------------------------------------
+     state
+     ------------------------------------------------------------ */
   var state = {
     model: 'esplus',
-    theme: 'dark',
+    mode: 'calc',
+    view: 'home',
     angle: 'deg',
     format: 'norm',
+    complexFormat: 'rect',
+    theme: 'dark',
     sound: true,
+    haptic: true,
+    autoFraction: true,
+
     expr: '',
     caret: 0,
     ans: 0,
@@ -21,52 +33,40 @@
     shift: false,
     alpha: false,
     storeArmed: false,
-    varsMode: 'recall',
     result: '0',
     isError: false,
-    showFraction: false,
-    lastRaw: null,
+    rawValue: null,
+    sdStage: 0,
     history: [],
-    histIndex: -1
+    histIndex: -1,
+    memory: 0
   };
 
-  /* ---------------- DOM ---------------- */
-  var $ = function (id) { return document.getElementById(id); };
-  var elExpr = $('expr');
-  var elResult = $('result');
-  var elHint = $('screenHint');
-  var elKeypad = $('keypad');
-  var elFlags = $('flags');
-  var elMode = $('modeLabel');
-  var elAngle = $('angleLabel');
-  var elScreen = $('screen');
-  var elOverlay = $('overlay');
-  var elToast = $('toast');
-  var toastTimer = null;
-
-  function toast(msg) {
-    if (!elToast) return;
-    elToast.textContent = msg;
-    elToast.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { elToast.hidden = true; }, 1400);
-  }
-
-  /* ---------------- storage ---------------- */
-  var STORE_KEY = 'mkjcalc.state.v1';
+  var STORE_KEY = 'mkjcalc.v2';
 
   function saveState() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({
         model: state.model,
-        theme: state.theme,
         angle: state.angle,
         format: state.format,
+        complexFormat: state.complexFormat,
+        theme: state.theme,
         sound: state.sound,
+        haptic: state.haptic,
+        autoFraction: state.autoFraction,
         vars: state.vars,
-        history: state.history.slice(0, 60)
+        history: state.history.slice(0, 80),
+        matrices: state.matrices,
+        vectors: state.vectors,
+        tableExpr: state.tableExpr,
+        tableStart: state.tableStart,
+        tableEnd: state.tableEnd,
+        tableStep: state.tableStep,
+        statX: state.statX, statY: state.statY,
+        solveExpr: state.solveExpr
       }));
-    } catch (e) { /* ignore */ }
+    } catch (e) { /* quota / private mode */ }
   }
 
   function loadState() {
@@ -74,105 +74,263 @@
       var raw = localStorage.getItem(STORE_KEY);
       if (!raw) return;
       var s = JSON.parse(raw);
-      if (s.model && L[s.model]) state.model = s.model;
-      if (s.theme) state.theme = s.theme;
-      if (s.angle) state.angle = s.angle;
-      if (s.format) state.format = s.format;
-      if (typeof s.sound === 'boolean') state.sound = s.sound;
-      if (s.vars) Object.keys(state.vars).forEach(function (key) {
-        if (typeof s.vars[key] === 'number') state.vars[key] = s.vars[key];
+      ['model', 'angle', 'format', 'complexFormat', 'theme'].forEach(function (k) {
+        if (s[k]) state[k] = s[k];
+      });
+      if (typeof s.autoFraction === 'boolean') state.autoFraction = s.autoFraction;
+      ['sound', 'haptic'].forEach(function (k) {
+        if (typeof s[k] === 'boolean') state[k] = s[k];
+      });
+      if (s.vars) Object.keys(state.vars).forEach(function (k) {
+        if (typeof s.vars[k] === 'number') state.vars[k] = s.vars[k];
       });
       if (Array.isArray(s.history)) state.history = s.history;
+      if (state.history.length) state.histIndex = -1;
+      ['matrices', 'vectors', 'tableExpr', 'tableStart', 'tableEnd', 'tableStep',
+       'statX', 'statY', 'solveExpr'].forEach(function (k) {
+        if (s[k] !== undefined) state[k] = s[k];
+      });
+      if (!LAY[state.model]) state.model = 'esplus';
     } catch (e) { /* ignore */ }
   }
 
-  /* ---------------- audio click ---------------- */
+  /* ------------------------------------------------------------
+     audio + haptics
+     ------------------------------------------------------------ */
   var audioCtx = null;
   function click(freq) {
     if (!state.sound) return;
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
       var t = audioCtx.currentTime;
       var osc = audioCtx.createOscillator();
       var gain = audioCtx.createGain();
       osc.type = 'square';
       osc.frequency.value = freq || 820;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.05, t + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.045, t + 0.004);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
-      osc.connect(gain).connect(audioCtx.destination);
-      osc.start(t); osc.stop(t + 0.05);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.05);
     } catch (e) { /* ignore */ }
   }
 
-  /* ---------------- rendering ---------------- */
-  function renderScreen() {
-    // expression with caret
-    var before = state.expr.slice(0, state.caret);
-    var after = state.expr.slice(state.caret);
-    elExpr.innerHTML = '';
-    var s1 = document.createElement('span');
-    s1.textContent = before;
-    var c = document.createElement('span');
-    c.className = 'caret-char';
-    c.textContent = after.charAt(0) || ' ';
-    if (after.charAt(0)) c.classList.add('caret-on');
-    var s2 = document.createElement('span');
-    s2.textContent = after.slice(1);
-    elExpr.appendChild(s1);
-    elExpr.appendChild(c);
-    elExpr.appendChild(s2);
-
-    // result
-    elResult.textContent = state.result;
-    elResult.className = 'result' +
-      (state.isError ? ' error' : '') +
-      (state.result.length > 13 ? ' small' : '');
-
-    elMode.textContent = state.storeArmed ? 'STO' : 'COMP';
-    elAngle.textContent = state.angle === 'deg' ? 'D' : state.angle === 'rad' ? 'R' : 'G';
-
-    // flags
-    var flags = { S: state.shift, A: state.alpha, M: state.vars.M !== 0, STO: state.storeArmed, R: state.angle === 'rad' };
-    Array.prototype.forEach.call(elFlags.children, function (f) {
-      f.classList.toggle('on', !!flags[f.dataset.flag]);
-    });
-
-    // hint
-    if (state.isError) elHint.textContent = 'PLEASE CHECK YOUR INPUT';
-    else if (state.storeArmed) elHint.textContent = 'STO ▸ SELECT A VARIABLE';
-    else if (state.shift) elHint.textContent = 'SHIFT ACTIVE';
-    else if (state.showFraction) elHint.textContent = 'S⇔D FRACTION VIEW';
-    else elHint.textContent = state.expr ? '' : 'Press a key to start';
-
-    elScreen.classList.toggle('is-off', false);
+  function haptic(ms) {
+    if (!state.haptic) return;
+    if (navigator.vibrate) { try { navigator.vibrate(ms || 8); } catch (e) { /* ignore */ } }
   }
 
-  function renderKeys() {
-    var layout = L[state.model];
+  /* ------------------------------------------------------------
+     toast
+     ------------------------------------------------------------ */
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 1600);
+  }
+
+  /* ------------------------------------------------------------
+     router
+     ------------------------------------------------------------ */
+  function show(view) {
+    state.view = view;
+    $('viewHome').hidden = view !== 'home';
+    $('viewModes').hidden = view !== 'modes';
+    $('viewCalc').hidden = view !== 'calc';
+    document.body.dataset.view = view;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /* ------------------------------------------------------------
+     model picker
+     ------------------------------------------------------------ */
+  var MODEL_META = {
+    esplus: {
+      name: '991 ES Plus',
+      desc: 'The classic scientific layout with a natural display.',
+      tags: ['Classic', 'Natural display', '12 modes'],
+      accent: '#ff9b3d', screen: ['#c9d8c4', '#a9bba4']
+    },
+    explus: {
+      name: '991 EX Plus',
+      desc: 'Class-style pad, extra function rows and menu keys.',
+      tags: ['Class pad', 'Menu keys', '12 modes'],
+      accent: '#47b3ff', screen: ['#cfe0e6', '#b3c8d0']
+    },
+    cw: {
+      name: '991 CW',
+      desc: 'Flat pad, round HOME key and a cleaner keyboard.',
+      tags: ['Flat pad', 'HOME key', '12 modes'],
+      accent: '#7de2c3', screen: ['#c4d3d0', '#a9bbb7']
+    }
+  };
+
+  function buildModelCards() {
+    var host = $('modelCards');
+    host.innerHTML = '';
+    LAY.order.forEach(function (id) {
+      var meta = MODEL_META[id];
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'model-card' + (state.model === id ? ' selected' : '');
+      card.style.setProperty('--mc', meta.accent);
+      card.style.setProperty('--mc-screen', meta.screen[0]);
+      card.style.setProperty('--mc-screen2', meta.screen[1]);
+
+      var prev = document.createElement('div');
+      prev.className = 'mc-preview';
+      var scr = document.createElement('div');
+      scr.className = 'mc-screen';
+      var keys = document.createElement('div');
+      keys.className = 'mc-keys';
+      for (var i = 0; i < 12; i++) {
+        var k = document.createElement('i');
+        if (i === 11 || i === 3) k.className = 'hot';
+        keys.appendChild(k);
+      }
+      prev.appendChild(scr);
+      prev.appendChild(keys);
+
+      var body = document.createElement('div');
+      body.className = 'mc-body';
+      body.innerHTML =
+        '<div class="mc-name">MKJ · ' + meta.name + '</div>' +
+        '<div class="mc-desc">' + meta.desc + '</div>' +
+        '<div class="mc-tags">' + meta.tags.map(function (t) {
+          return '<span class="mc-tag">' + t + '</span>';
+        }).join('') + '</div>';
+
+      var go = document.createElement('div');
+      go.className = 'mc-go';
+      go.textContent = '›';
+
+      card.appendChild(prev);
+      card.appendChild(body);
+      card.appendChild(go);
+      card.addEventListener('click', function () {
+        state.model = id;
+        saveState();
+        click(680);
+        buildModelCards();
+        enterModes();
+      });
+      host.appendChild(card);
+    });
+  }
+
+  /* ------------------------------------------------------------
+     mode grid
+     ------------------------------------------------------------ */
+  function buildModeGrid() {
+    var layout = LAY[state.model];
+    var grid = $('modeGrid');
+    grid.innerHTML = '';
+    $('barModel').textContent = layout.plate;
     document.body.dataset.model = state.model;
-    document.body.dataset.theme = state.theme;
 
-    $('plateModel').textContent = layout.plate;
-    $('plateSub').textContent = layout.sub;
-    $('footModel').textContent = layout.foot;
+    MODES.order.forEach(function (id) {
+      var m = MODES[id];
+      if (!m) return;
+      if (m.models && m.models.indexOf(state.model) < 0) return;
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'mode-card';
+      card.style.setProperty('--mcc', m.color);
+      card.innerHTML =
+        '<div class="mode-icon">' + m.icon + '</div>' +
+        '<div class="mode-name">' + m.name + '</div>' +
+        '<div class="mode-desc">' + m.desc + '</div>';
+      card.addEventListener('click', function () {
+        click(700);
+        openMode(id);
+      });
+      grid.appendChild(card);
+    });
+  }
 
-    elKeypad.className = 'keypad' + (layout.cols === 6 ? ' cols-6' : '');
-    elKeypad.innerHTML = '';
+  function enterModes() {
+    buildModeGrid();
+    show('modes');
+  }
+
+  /* ------------------------------------------------------------
+     keypad
+     ------------------------------------------------------------ */
+  function buildCompactKeypad() {
+    var wrap = document.createElement('div');
+    wrap.className = 'compact-pad';
+    var bar = document.createElement('div');
+    bar.className = 'compact-actions';
+    [
+      ['AC', 'ac', 'ac'], ['DEL', 'del', 'del'], ['=', 'equals', 'enter']
+    ].forEach(function (item) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ck ' + item[2];
+      b.textContent = item[0];
+      b.addEventListener('click', function () {
+        click(700); haptic(8);
+        runCommand(item[1]);
+      });
+      bar.appendChild(b);
+    });
+    wrap.appendChild(bar);
+
+    var pad = document.createElement('div');
+    pad.className = 'compact-keys';
+    ['7', '8', '9', '×', '4', '5', '6', '÷', '1', '2', '3', '+', '0', '.', '(', '−']
+      .forEach(function (label) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ck';
+        b.textContent = label;
+        b.addEventListener('click', function () {
+          click(840); haptic(8);
+          insert(label === '×' ? '*' : label === '÷' ? '/' : label === '−' ? '-' : label);
+        });
+        pad.appendChild(b);
+      });
+    wrap.appendChild(pad);
+    return wrap;
+  }
+
+  function renderKeypad() {
+    renderKeypadInto($('keypad'));
+  }
+
+  function renderKeypadInto(pad) {
+    var layout = LAY[state.model];
+    pad.innerHTML = '';
+    var isPrimary = pad.id === 'keypad';
+    if (isPrimary) pad.classList.toggle('cols-6', layout.cols === 6);
 
     layout.keys.forEach(function (key) {
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'key ' + (key.c || '');
       if (key.span > 1) b.classList.add('wide');
-      b.dataset.act = key.act;
-      b.dataset.value = key.v;
+
+      var shiftLabel = key.s && state.shift ? key.s : null;
+      var alphaLabel = key.a;
 
       if (key.s) {
         var sh = document.createElement('span');
         sh.className = 'k-shift';
         sh.textContent = key.s;
         b.appendChild(sh);
+      }
+      if (key.a) {
+        var al = document.createElement('span');
+        al.className = 'k-alpha';
+        al.textContent = key.a;
+        b.appendChild(al);
       }
       var lab = document.createElement('span');
       lab.className = 'k-label ' + (key.sm || '');
@@ -183,43 +341,103 @@
         ev.preventDefault();
         pressKey(key);
       });
-      elKeypad.appendChild(b);
+      pad.appendChild(b);
     });
-
-    elKeypad.classList.toggle('shift-on', state.shift);
+    document.body.classList.toggle('shift-on', state.shift);
+    document.body.classList.toggle('alpha-on', state.alpha);
   }
 
-  function renderModelButtons() {
-    Array.prototype.forEach.call(document.querySelectorAll('.model-btn'), function (b) {
-      b.classList.toggle('active', b.dataset.model === state.model);
-      b.setAttribute('aria-selected', b.dataset.model === state.model ? 'true' : 'false');
-    });
+  /* press a key, applying SHIFT / ALPHA */
+  function pressKey(key) {
+    click(key.act === 'cmd' ? 620 : 840);
+    haptic(8);
+
+    /* modifiers first */
+    if (key.act === 'cmd' && key.v === 'shift') {
+      state.shift = !state.shift;
+      state.alpha = false;
+      renderScreen(); renderKeypad();
+      return;
+    }
+    if (key.act === 'cmd' && key.v === 'alpha') {
+      state.alpha = !state.alpha;
+      state.shift = false;
+      renderScreen(); renderKeypad();
+      return;
+    }
+
+    /* SHIFT / ALPHA alternative */
+    if (state.shift && key.s) {
+      state.shift = false;
+      if (key.sv) {
+        if (isCmd(key.sv)) runCommand(key.sv);
+        else insert(key.sv);
+      } else {
+        toast(key.s + ' is a label only');
+      }
+      renderKeypad();
+      return;
+    }
+    if (state.alpha && key.a) {
+      state.alpha = false;
+      insert(key.av || key.a);
+      renderKeypad();
+      return;
+    }
+
+    if (state.shift || state.alpha) {
+      state.shift = false;
+      state.alpha = false;
+      renderKeypad();
+    }
+
+    if (key.act === 'cmd') runCommand(key.v);
+    else insert(key.v);
   }
 
-  /* ---------------- input handling ---------------- */
+  var COMMANDS = {
+    off: 1, on: 1, ac: 1, del: 1, equals: 1, sd: 1, left: 1, right: 1, up: 1, down: 1,
+    mode: 1, home: 1, settings: 1, tools: 1, catalog: 1, variable: 1, ans: 1,
+    mplus: 1, mminus: 1, sto: 1, rcl: 1, eng: 1, drg: 1, calc: 1, solve: 1, rand: 1,
+    shift: 1, alpha: 1
+  };
+  function isCmd(v) { return typeof v === 'string' && COMMANDS[v] === 1; }
+
+  /* ------------------------------------------------------------
+     expression input
+     ------------------------------------------------------------ */
   function insert(text) {
+    if (text == null) return;
     if (state.storeArmed) {
-      // typing a letter while STO is armed stores the answer
-      if (/^[A-F]$/.test(text)) { storeTo(text); return; }
+      if (/^[A-FM]$/.test(text)) { storeTo(text); return; }
       state.storeArmed = false;
     }
     state.expr = state.expr.slice(0, state.caret) + text + state.expr.slice(state.caret);
     state.caret += text.length;
     state.isError = false;
-    state.showFraction = false;
+    state.sdStage = 0;
     renderScreen();
   }
 
   function backspace() {
-    if (state.caret === 0) return;
-    // delete multi-char tokens like 'sin(' , 'Abs(' , '^(-1)' atomically-ish
+    if (!state.caret) return;
     var left = state.expr.slice(0, state.caret);
-    var m = left.match(/(sin⁻¹\(|cos⁻¹\(|tan⁻¹\(|sinh⁻¹\(|cosh⁻¹\(|tanh⁻¹\(|√\(|Abs\(|sin\(|cos\(|tan\(|sinh\(|cosh\(|tanh\(|log\(|ln\(|nCr\(|nPr\(|×10\^\(|\^\(-1\)|Ans)$/);
-    var cut = m ? m[1].length : 1;
+    var tokens = [
+      'sin⁻¹(', 'cos⁻¹(', 'tan⁻¹(', 'sinh⁻¹(', 'cosh⁻¹(', 'tanh⁻¹(',
+      'sin(', 'cos(', 'tan(', 'sinh(', 'cosh(', 'tanh(',
+      'log(', 'ln(', 'exp(', 'Abs(', 'Conjg(', 'Arg(', 'Re(', 'Im(',
+      'nCr(', 'nPr(', 'gcd(', 'lcm(', 'Pol(', 'Rec(', 'randInt(',
+      'round(', 'floor(', 'ceil(', 'frac(', 'sign(', 'min(', 'max(',
+      '∑(', 'Π(', '∫(', 'd/dx(', '√(', '∛(', '×10^(', '^(1/', '^(-1)'
+    ];
+    var cut = 1;
+    for (var i = 0; i < tokens.length; i++) {
+      if (left.slice(-tokens[i].length) === tokens[i]) { cut = tokens[i].length; break; }
+    }
     state.expr = state.expr.slice(0, state.caret - cut) + state.expr.slice(state.caret);
     state.caret -= cut;
     state.isError = false;
-    state.showFraction = false;
+    state.sdStage = 0;
     renderScreen();
   }
 
@@ -228,259 +446,269 @@
     state.caret = 0;
     state.result = '0';
     state.isError = false;
-    state.showFraction = false;
+    state.rawValue = null;
+    state.sdStage = 0;
     state.shift = false;
     state.alpha = false;
     state.storeArmed = false;
     state.histIndex = -1;
-    renderScreen();
+    renderScreen(); renderKeypad();
   }
 
-  function toggleShift() {
-    state.shift = !state.shift;
-    state.alpha = false;
-    renderScreen();
-  }
-  function toggleAlpha() {
-    state.alpha = !state.alpha;
-    state.shift = false;
-    renderScreen();
+  /* ------------------------------------------------------------
+     screen rendering
+     ------------------------------------------------------------ */
+  function renderScreen() {
+    var layout = LAY[state.model];
+    $('plateModel').textContent = layout.plate;
+    $('plateSub').textContent = layout.sub;
+    $('footModel').textContent = layout.foot;
+    $('calcSubtitle').textContent = layout.plate;
+    $('calcTitle').textContent = (MODES[state.mode] || MODES.calc).name;
+
+    var before = state.expr.slice(0, state.caret);
+    var after = state.expr.slice(state.caret);
+    var exprEl = $('expr');
+    exprEl.innerHTML = '';
+    var s1 = document.createElement('span');
+    s1.textContent = before;
+    var c = document.createElement('span');
+    c.className = 'caret-char';
+    var nextChar = after.charAt(0);
+    c.textContent = nextChar || ' ';
+    if (nextChar) c.classList.add('caret-on');
+    var s2 = document.createElement('span');
+    s2.textContent = after.slice(1);
+    exprEl.appendChild(s1); exprEl.appendChild(c); exprEl.appendChild(s2);
+
+    var res = $('result');
+    res.textContent = state.result;
+    res.className = 'result' +
+      (state.isError ? ' error' : '') +
+      (state.result.length > 22 ? ' tiny' : state.result.length > 13 ? ' small' : '');
+
+    $('modeLabel').textContent = modeTag(state.mode);
+    $('angleLabel').textContent = state.angle === 'deg' ? 'D' : state.angle === 'rad' ? 'R' : 'G';
+
+    var flags = {
+      S: state.shift,
+      A: state.alpha,
+      M: state.vars.M !== 0,
+      STO: state.storeArmed,
+      i: state.complexFormat === 'polar' && (state.mode === 'complex' || state.mode === 'calc'),
+      R: state.angle === 'rad'
+    };
+    Array.prototype.forEach.call($('flags').children, function (f) {
+      f.classList.toggle('on', !!flags[f.dataset.flag]);
+    });
+
+    var hint = '';
+    if (state.isError) hint = 'CHECK INPUT';
+    else if (state.storeArmed) hint = 'STO ▸ PICK A VARIABLE';
+    else if (state.shift) hint = 'SHIFT ACTIVE';
+    else if (state.alpha) hint = 'ALPHA ACTIVE';
+    else if (state.sdStage === 1) hint = 'FRACTION VIEW';
+    else if (state.sdStage === 2) hint = 'π VIEW';
+    else if (state.mode !== 'calc') hint = (MODES[state.mode] || {}).name || '';
+    else hint = state.expr ? 'PRESS = TO EVALUATE' : 'PRESS A KEY TO START';
+    $('screenHint').textContent = hint;
   }
 
-  /* ---------------- evaluation ---------------- */
-  function compute(expr) {
-    if (!expr.trim()) return null;
-    var val = E.evaluate(expr, {
+  function modeTag(mode) {
+    return {
+      calc: 'COMP', complex: 'CMPLX', stat: 'STAT', matrix: 'MATRIX',
+      vector: 'VECTOR', equation: 'EQN', basen: 'BASE', ratio: 'RATIO',
+      table: 'TABLE', solve: 'SOLVE', verify: 'VERIFY', constants: 'CONST'
+    }[mode] || 'COMP';
+  }
+
+  /* ------------------------------------------------------------
+     evaluation
+     ------------------------------------------------------------ */
+  function evalCtx(extraVars) {
+    var vars = Object.assign({}, state.vars, { M: state.memory }, extraVars || {});
+    return {
       angle: state.angle,
       ans: state.ans,
-      vars: state.vars
-    });
-    return val;
+      vars: vars,
+      complex: complexMode(),
+      tol: 1e-10
+    };
   }
 
-  function showResult(val) {
-    state.lastRaw = val;
-    state.ans = val;
-    var text = E.formatNumber(val, { format: state.format });
-
-    // offer fraction when it's a clean small fraction and mode is norm
-    var fr = state.format === 'norm' ? E.fractionOf(val) : null;
-    state._fraction = fr;
-    state._decimal = text;
-    state.result = text;
-    state.isError = false;
-    state.showFraction = false;
-    elResult.classList.remove('flash');
-    void elResult.offsetWidth;
-    elResult.classList.add('flash');
+  function complexMode() {
+    return state.mode === 'complex' || state.mode === 'equation';
   }
 
-  function showError(msg) {
-    state.result = msg || 'Syntax ERROR';
-    state.isError = true;
-    state.showFraction = false;
-    renderScreen();
-    click(180);
+  function displayFormat() {
+    return {
+      format: state.format,
+      complex: complexMode(),
+      complexFormat: state.complexFormat,
+      angle: state.angle
+    };
   }
 
-  function equals() {
-    if (!state.expr.trim()) {
-      // pressing = on an empty screen re-shows Ans
-      state.result = E.formatNumber(state.ans, { format: state.format });
+  function evaluateCurrent() {
+    var src = state.expr.trim();
+    if (!src) {
+      state.result = E.formatValue(state.ans, displayFormat());
       renderScreen();
       return;
     }
     try {
-      var val = compute(state.expr);
-      if (val === null) return;
-      showResult(val);
-      pushHistory(state.expr, state.result);
+      var value = E.evaluate(src, evalCtx());
+      if (E.C.isPair(value)) {
+        state.result = E.formatValue(value, displayFormat());
+        state.rawValue = value;
+      } else {
+        var z = E.C.to(value);
+        if (Math.abs(z.im) < 1e-12 && state.format === 'norm') {
+          var fr = E.fractionOf(z.re);
+          state._fraction = fr;
+        } else {
+          state._fraction = null;
+        }
+        state.rawValue = value;
+        state.ans = Math.abs(z.im) < 1e-12 ? z.re : E.C.abs(value);
+        state.result = E.formatValue(value, displayFormat());
+        /* norm mode: show a clean fraction automatically (like S⇔D default) */
+        if (state.format === 'norm' && Math.abs(z.im) < 1e-12 && state._fraction && state.autoFraction !== false) {
+          state.result = E.fractionText(state._fraction);
+          state.sdStage = 1;
+        }
+      }
+      state.isError = false;
+      state.sdStage = 0;
+      $('result').classList.remove('flash');
+      void $('result').offsetWidth;
+      $('result').classList.add('flash');
+
+      state.history.unshift({ expr: src, result: state.result, mode: state.mode, ts: Date.now() });
+      if (state.history.length > 80) state.history.pop();
       state.histIndex = -1;
-      // after '=', move expression to result line behaviour: keep expr
+      saveState();
+      renderHistory();
       renderScreen();
     } catch (err) {
-      showError(err && err.message ? err.message : 'Math ERROR');
-    }
-  }
-
-  function pushHistory(expr, result) {
-    state.history.unshift({ expr: expr, result: result, model: state.model });
-    if (state.history.length > 60) state.history.pop();
-    saveState();
-    renderHistory();
-  }
-
-  /* ---------------- S⇔D ---------------- */
-  function toggleSD() {
-    if (state.isError) return;
-    if (state.showFraction) {
-      state.result = state._decimal || state.result;
-      state.showFraction = false;
-    } else if (state._fraction) {
-      state.result = E.formatFraction(state._fraction);
-      state.showFraction = true;
-    } else {
-      // try converting the typed expression to a decimal / fraction
-      var fr = E.fractionOf(state.ans);
-      if (fr) {
-        state.result = E.formatFraction(fr);
-        state._fraction = fr;
-        state.showFraction = true;
-      } else {
-        state.result = E.formatNumber(state.ans, { format: 'sci' });
-        state.showFraction = false;
-      }
-    }
-    renderScreen();
-  }
-
-  /* ---------------- store / recall ---------------- */
-  function armStore() {
-    state.storeArmed = true;
-    state.shift = false;
-    state.alpha = false;
-    renderScreen();
-  }
-
-  function storeTo(name) {
-    state.vars[name] = state.ans;
-    state.storeArmed = false;
-    state.result = E.formatNumber(state.ans, { format: state.format });
-    renderScreen();
-    saveState();
-  }
-
-  function recallVar(name) {
-    var v = state.vars[name];
-    if (state.varsMode === 'store' || state.storeArmed) {
-      state.storeArmed = false;
-      state.varsMode = 'recall';
-      storeTo(name);
-      toast('Ans → ' + name);
-      closePanel();
-      return;
-    }
-    state.ans = v;
-    state.result = E.formatNumber(v, { format: state.format });
-    state._fraction = E.fractionOf(v);
-    state._decimal = state.result;
-    state.isError = false;
-    closePanel();
-    renderScreen();
-    toast(name + ' = ' + state.result);
-  }
-
-  function openVars(mode) {
-    state.varsMode = mode;
-    $('varsTitle').textContent = mode === 'store' ? 'Store to variable' : 'Recall variable';
-    $('varsNote').textContent = mode === 'store'
-      ? 'Tap a variable to store the current answer (Ans).'
-      : 'Tap a variable to recall its value.';
-    renderVars();
-    openPanel('panelVars');
-  }
-
-  function renderVars() {
-    var grid = $('varsGrid');
-    if (!grid) return;
-    grid.innerHTML = '';
-    Object.keys(state.vars).forEach(function (name) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'var-btn';
-      var t = document.createElement('b');
-      t.textContent = name;
-      var v = document.createElement('span');
-      v.textContent = E.formatNumber(state.vars[name], { format: 'norm' });
-      b.appendChild(t); b.appendChild(v);
-      b.addEventListener('click', function () { recallVar(name); });
-      grid.appendChild(b);
-    });
-  }
-
-  /* ---------------- key dispatch ---------------- */
-  function pressKey(key) {
-    click(key.act === 'cmd' ? 620 : 840);
-
-    // SHIFT-prefixed behaviour for insertion keys
-    var label = key.l;
-
-    if (key.act === 'cmd') {
-      runCommand(key.v);
-      return;
-    }
-
-    if (state.shift && key.s) {
-      var shifted = key.s;
-      // shifted function that maps to a function name
-      var map = {
-        'x³': '³',
-        '∛': '∛(',
-        'x!': '!',
-        '10ˣ': '×10^(',
-        'eˣ': 'exp(',
-        'sin⁻¹': 'sin⁻¹(',
-        'cos⁻¹': 'cos⁻¹(',
-        'tan⁻¹': 'tan⁻¹(',
-        'sinh⁻¹': 'sinh⁻¹(',
-        'nPr': 'nPr(',
-        'e': 'e'
-      };
-      insert(map[shifted] || shifted);
-      state.shift = false;
+      state.result = (err && err.message) || 'Math ERROR';
+      state.isError = true;
+      state.sdStage = 0;
+      click(180);
+      haptic(40);
       renderScreen();
-      return;
-    }
-
-    // plain insertion
-    insert(key.v);
-    if (state.shift) { state.shift = false; renderScreen(); }
-
-    // if STO armed and a variable-looking key was pressed
-    if (state.storeArmed && /^[A-F]$/.test(label)) {
-      storeTo(label);
     }
   }
 
+  /* S⇔D cycling: decimal → fraction → π → decimal */
+  function toggleSD() {
+    if (state.isError) { evaluateCurrent(); return; }
+    if (state.rawValue == null) {
+      /* nothing evaluated yet: evaluate first if there is an expression */
+      if (state.expr.trim()) evaluateCurrent();
+      return;
+    }
+    var v = state.rawValue;
+    if (E.C.isPair(v)) { toast('Result is a pair'); return; }
+    var z = E.C.to(v);
+    if (Math.abs(z.im) > 1e-12) {
+      state.complexFormat = state.complexFormat === 'rect' ? 'polar' : 'rect';
+      $('selComplex').value = state.complexFormat;
+      state.result = E.formatValue(v, displayFormat());
+      renderScreen(); saveState();
+      return;
+    }
+    var x = z.re;
+    var fr = E.fractionOf(x);
+    var pi = E.piFraction(x);
+    var stages = [];
+    stages.push(E.formatValue(x, { format: 'norm', complex: true }));
+    if (fr) stages.push(E.fractionText(fr));
+    if (pi && stages.indexOf(pi) < 0) stages.push(pi);
+    if (stages.length === 1) { toast('No alternative form'); return; }
+    state.sdStage = (state.sdStage + 1) % stages.length;
+    state.result = stages[state.sdStage];
+    if (state.sdStage > 0 && fr && state.result === E.fractionText(fr)) state._fraction = fr;
+    renderScreen();
+  }
+
+  /* ------------------------------------------------------------
+     commands
+     ------------------------------------------------------------ */
   function runCommand(cmd) {
     switch (cmd) {
-      case 'shift': toggleShift(); break;
-      case 'alpha': toggleAlpha(); break;
-      case 'del': backspace(); break;
+      case 'off': screenOff(); break;
+      case 'on': clearAll(); break;
       case 'ac': clearAll(); break;
-      case 'equals': equals(); break;
+      case 'del': backspace(); break;
+      case 'equals': evaluateCurrent(); break;
       case 'sd': toggleSD(); break;
-      case 'ans': insert('Ans'); break;
-      case 'mplus':
-        state.vars.M += state.ans;
-        state.result = E.formatNumber(state.vars.M, { format: state.format });
-        renderScreen(); saveState();
-        break;
-      case 'rcl': openVars('recall'); break;
-      case 'sto': openVars('store'); break;
-      case 'setup': openPanel('panelSetup'); break;
-      case 'help': openPanel('panelHelp'); break;
-      case 'home': clearAll(); break;
-      case 'calc':
-      case 'solve':
-        equals();
-        break;
-      case 'ncr': insert('nCr('); break;
-      case 'npr': insert('nPr('); break;
-      case 'gcd': insert('gcd('); break;
-      case 'lcm': insert('lcm('); break;
       case 'left': state.caret = Math.max(0, state.caret - 1); renderScreen(); break;
       case 'right': state.caret = Math.min(state.expr.length, state.caret + 1); renderScreen(); break;
-      case 'histPrev': browseHistory(-1); break;
-      case 'histNext': browseHistory(1); break;
-      case 'on': clearAll(); break;
-      default: break;
+      case 'up': histBrowse(-1); break;
+      case 'down': histBrowse(1); break;
+      case 'mode': case 'home': enterModes(); break;
+      case 'settings': case 'tools': openSettings(); break;
+      case 'catalog': openCatalog(); break;
+      case 'variable': openVars('insert'); break;
+      case 'ans': insert('Ans'); break;
+      case 'mplus':
+        state.memory += state.ans;
+        state.vars.M = state.memory;
+        state.result = E.formatValue(state.memory, displayFormat());
+        saveState(); renderScreen();
+        toast('M = ' + state.result);
+        break;
+      case 'mminus':
+        state.memory -= state.ans;
+        state.vars.M = state.memory;
+        state.result = E.formatValue(state.memory, displayFormat());
+        saveState(); renderScreen();
+        toast('M = ' + state.result);
+        break;
+      case 'sto': openVars('store'); break;
+      case 'rcl': openVars('recall'); break;
+      case 'eng':
+        state.format = state.format === 'eng' ? 'norm' : 'eng';
+        $('selFormat').value = state.format;
+        if (state.rawValue != null && !E.C.isPair(state.rawValue)) {
+          state.rawValue = E.C.to(state.rawValue);
+          state.result = E.formatValue(state.rawValue, displayFormat());
+        }
+        saveState(); renderScreen();
+        toast('Format: ' + state.format.toUpperCase());
+        break;
+      case 'drg':
+        state.angle = state.angle === 'deg' ? 'rad' : state.angle === 'rad' ? 'grad' : 'deg';
+        $('selAngle').value = state.angle;
+        saveState(); renderScreen();
+        toast('Angle: ' + state.angle.toUpperCase());
+        break;
+      case 'calc': openCalcDialog(); break;
+      case 'solve': openMode('solve'); break;
+      case 'rand': insert('rand'); break;
+      default: /* unknown command */ break;
     }
   }
 
-  function browseHistory(dir) {
+  function screenOff() {
+    state.result = '';
+    state.expr = '';
+    state.caret = 0;
+    renderScreen();
+    $('screen').classList.add('is-off');
+    $('screenHint').textContent = '';
+    var restore = function () {
+      $('screen').classList.remove('is-off');
+      clearAll();
+      document.removeEventListener('pointerdown', restore);
+    };
+    document.addEventListener('pointerdown', restore);
+  }
+
+  function histBrowse(dir) {
     if (!state.history.length) return;
-    if (state.histIndex === -1 && dir < 0) state.histIndex = 0;
+    if (state.histIndex === -1) state.histIndex = dir < 0 ? 0 : -1;
     else state.histIndex = Math.min(state.history.length - 1, Math.max(0, state.histIndex + dir));
     var item = state.history[state.histIndex];
     if (!item) return;
@@ -491,7 +719,83 @@
     renderScreen();
   }
 
-  /* ---------------- panels ---------------- */
+  /* ------------------------------------------------------------
+     modes
+     ------------------------------------------------------------ */
+  var activeModeApi = null;
+
+  function openMode(id) {
+    var m = MODES[id];
+    if (!m) return;
+    state.mode = id;
+    var ws = $('workspace');
+    ws.innerHTML = '';
+    activeModeApi = null;
+
+    var panelModes = ['calc', 'complex'];
+    var isPanel = panelModes.indexOf(id) >= 0;
+
+    if (!isPanel && m.render) {
+      ws.hidden = false;
+      var api = makeApi();
+      activeModeApi = api;
+      try { m.render(ws, api); } catch (err) {
+        ws.innerHTML = '<div class="mode-out is-error">' + err.message + '</div>';
+      }
+
+      /* compact keypad for mode workspaces */
+      var basic = buildCompactKeypad();
+      ws.appendChild(basic);
+
+      /* expandable full keypad */
+      var fullWrap = document.createElement('div');
+      fullWrap.hidden = true;
+      var fullPad = document.createElement('div');
+      fullPad.className = 'keypad';
+      fullWrap.appendChild(fullPad);
+      ws.appendChild(fullWrap);
+      renderKeypadInto(fullPad);
+
+      var toggle = document.createElement('button');
+      toggle.className = 'btn ghost pad-toggle';
+      toggle.textContent = '⌨ Full keypad';
+      toggle.addEventListener('click', function () {
+        fullWrap.hidden = !fullWrap.hidden;
+        toggle.textContent = fullWrap.hidden ? '⌨ Full keypad' : '⌨ Hide full keypad';
+      });
+      ws.appendChild(toggle);
+
+      $('padArea').hidden = true;
+    } else {
+      ws.hidden = true;
+      $('padArea').hidden = false;
+    }
+
+    show('calc');
+    renderKeypad();
+    renderScreen();
+  }
+
+  /* API handed to mode modules */
+  function makeApi() {
+    return {
+      state: state,
+      engine: E,
+      toast: toast,
+      insertInto: function (text) { insert(text); },
+      saveState: saveState,
+      calcBind: function () { /* main LCD is used */ },
+      calcKey: function (cmd) { runCommand(cmd); },
+      calcReformat: function () {
+        if (state.rawValue != null) state.result = E.formatValue(state.rawValue, displayFormat());
+        renderScreen();
+      }
+    };
+  }
+
+  /* ------------------------------------------------------------
+     panels
+     ------------------------------------------------------------ */
   var openPanelId = null;
 
   function openPanel(id) {
@@ -499,18 +803,128 @@
     var p = $(id);
     if (!p) return;
     p.hidden = false;
-    elOverlay.hidden = false;
+    $('overlay').hidden = false;
     openPanelId = id;
   }
-
   function closePanel() {
-    if (openPanelId) {
-      $(openPanelId).hidden = true;
-      openPanelId = null;
-    }
-    elOverlay.hidden = true;
+    if (openPanelId) { $(openPanelId).hidden = true; openPanelId = null; }
+    $('overlay').hidden = true;
   }
 
+  function openSheet(title, bodyHtml, footHtml) {
+    $('sheetTitle').textContent = title;
+    $('sheetBody').innerHTML = bodyHtml;
+    var foot = $('sheetFoot');
+    foot.innerHTML = footHtml || '';
+    foot.hidden = !footHtml;
+    openPanel('sheet');
+    return $('sheetBody');
+  }
+
+  /* settings */
+  function openSettings() {
+    $('selAngle').value = state.angle;
+    $('selFormat').value = state.format;
+    $('selComplex').value = state.complexFormat;
+    $('selTheme').value = state.theme;
+    $('selSound').value = state.sound ? 'on' : 'off';
+    $('selHaptic').value = state.haptic ? 'on' : 'off';
+    $('selAutoFrac').value = state.autoFraction ? 'on' : 'off';
+    openPanel('panelSettings');
+  }
+
+  /* catalog */
+  function openCatalog() {
+    var body = $('catalogBody');
+    body.innerHTML = '';
+    LAY.catalog.forEach(function (group) {
+      var g = document.createElement('div');
+      g.className = 'cat-group';
+      var h = document.createElement('h4');
+      h.textContent = group.group;
+      g.appendChild(h);
+      var items = document.createElement('div');
+      items.className = 'cat-items';
+      group.items.forEach(function (item) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cat-item';
+        b.textContent = item;
+        b.addEventListener('click', function () {
+          insert(item);
+          closePanel();
+        });
+        items.appendChild(b);
+      });
+      g.appendChild(items);
+      body.appendChild(g);
+    });
+    openPanel('panelCatalog');
+  }
+
+  /* variables */
+  function openVars(mode) {
+    state.varsMode = mode;
+    $('varsTitle').textContent =
+      mode === 'store' ? 'Store answer in a variable' :
+      mode === 'recall' ? 'Recall a variable' : 'Insert a variable';
+    $('varsNote').textContent =
+      mode === 'store' ? 'Ans এর মান ভেরিয়েবলে রাখা হবে।' :
+      mode === 'recall' ? 'ভেরিয়েবলের মান রেজাল্ট লাইনে বসবে।' :
+      'এক্সপ্রেশনে ভেরিয়েবল বসাবে।';
+    renderVars();
+    openPanel('panelVars');
+  }
+
+  function renderVars() {
+    var grid = $('varsGrid');
+    grid.innerHTML = '';
+    Object.keys(state.vars).forEach(function (name) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'var-btn';
+      var t = document.createElement('b');
+      t.textContent = name;
+      var v = document.createElement('span');
+      var val = name === 'M' ? state.memory : state.vars[name];
+      v.textContent = E.formatValue(val, { format: 'norm' });
+      b.appendChild(t); b.appendChild(v);
+      b.addEventListener('click', function () {
+        if (state.varsMode === 'store') {
+          state.vars[name] = state.ans;
+          if (name === 'M') state.memory = state.ans;
+          toast('Ans → ' + name);
+          saveState();
+          closePanel();
+        } else if (state.varsMode === 'recall') {
+          state.ans = val;
+          state.rawValue = val;
+          state.result = E.formatValue(val, displayFormat());
+          state.isError = false;
+          renderScreen();
+          toast(name + ' = ' + state.result);
+          closePanel();
+        } else {
+          insert(name);
+          closePanel();
+        }
+      });
+      grid.appendChild(b);
+    });
+  }
+
+  /* store via keypad */
+  function storeTo(name) {
+    state.vars[name] = state.ans;
+    if (name === 'M') state.memory = state.ans;
+    state.storeArmed = false;
+    state.result = E.formatValue(state.ans, displayFormat());
+    saveState();
+    renderScreen();
+    toast('Ans → ' + name);
+  }
+
+  /* history */
   function renderHistory() {
     var list = $('historyList');
     if (!list) return;
@@ -522,18 +936,15 @@
     state.history.forEach(function (item) {
       var d = document.createElement('div');
       d.className = 'hist-item';
-      var e = document.createElement('div');
-      e.className = 'hist-expr';
-      e.textContent = item.expr;
-      var r = document.createElement('div');
-      r.className = 'hist-res';
-      r.textContent = item.result;
-      d.appendChild(e); d.appendChild(r);
+      d.innerHTML = '<div class="hist-expr"></div><div class="hist-res"></div>';
+      d.querySelector('.hist-expr').textContent = item.expr;
+      d.querySelector('.hist-res').textContent = item.result;
       d.addEventListener('click', function () {
         state.expr = item.expr;
         state.caret = state.expr.length;
         state.result = item.result;
         state.isError = false;
+        if (item.mode && MODES[item.mode] && item.mode !== state.mode) openMode(item.mode);
         closePanel();
         renderScreen();
       });
@@ -541,56 +952,140 @@
     });
   }
 
-  /* ---------------- keyboard ---------------- */
-  function onKeyDown(ev) {
-    var k = ev.key;
-    if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'INPUT') return;
-
-    if (/^[0-9.]$/.test(k)) { insert(k); ev.preventDefault(); return; }
-    if (k === '+' || k === '-' || k === '*' || k === '/' || k === '^') { insert(k); ev.preventDefault(); return; }
-    if (k === '(' || k === ')') { insert(k); ev.preventDefault(); return; }
-    if (k === '%') { insert('%'); ev.preventDefault(); return; }
-
-    if (k === 'Enter' || k === '=') {
-      if (ev.shiftKey) toggleSD(); else equals();
-      ev.preventDefault(); return;
+  /* CALC — evaluate with temporary variable values */
+  function variablesInExpression(expr) {
+    var found = [];
+    var re = /(?:^|[^A-Za-z])([A-FM])(?![A-Za-z])/g;
+    var m;
+    while ((m = re.exec(expr))) {
+      if (found.indexOf(m[1]) < 0) found.push(m[1]);
     }
-    if (k === 'Backspace') { backspace(); ev.preventDefault(); return; }
-    if (k === 'Escape') { clearAll(); ev.preventDefault(); return; }
-    if (k === 'Delete') { clearAll(); ev.preventDefault(); return; }
-    if (k === 'ArrowLeft') { runCommand('left'); ev.preventDefault(); return; }
-    if (k === 'ArrowRight') { runCommand('right'); ev.preventDefault(); return; }
-    if (k === 'ArrowUp') { runCommand('histPrev'); ev.preventDefault(); return; }
-    if (k === 'ArrowDown') { runCommand('histNext'); ev.preventDefault(); return; }
-    if (k === 's' || k === 'S') { toggleShift(); ev.preventDefault(); return; }
-    if (k === 'a' || k === 'A') { toggleAlpha(); ev.preventDefault(); return; }
-
-    // letters → constants / functions typed directly
-    var lower = k.toLowerCase();
-    if (lower === 'p') { insert('π'); ev.preventDefault(); return; }
-    if (lower === 'e') { insert('e'); ev.preventDefault(); return; }
-    if (lower === 'x') { insert('x'); ev.preventDefault(); return; }
+    return found;
   }
 
-  /* ---------------- setup wiring ---------------- */
-  function wireSetup() {
-    $('selAngle').value = state.angle;
-    $('selFormat').value = state.format;
-    $('selTheme').value = state.theme;
-    $('selSound').value = state.sound ? 'on' : 'off';
+  function openCalcDialog() {
+    var names = variablesInExpression(state.expr);
+    if (!names.length) { evaluateCurrent(); return; }
+    var body = $('calcVarsBody');
+    body.innerHTML = '';
+    var inputs = {};
+    names.forEach(function (name) {
+      var wrap = document.createElement('label');
+      wrap.className = 'field';
+      wrap.innerHTML = '<span>' + name + '</span>';
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.inputMode = 'decimal';
+      inp.value = String(state.vars[name]);
+      inp.style.fontFamily = 'var(--font-num)';
+      inputs[name] = inp;
+      wrap.appendChild(inp);
+      body.appendChild(wrap);
+    });
+    var note = document.createElement('div');
+    note.className = 'panel-note';
+    note.textContent = 'এই মানগুলো শুধু এই হিসাবের জন্য ব্যবহার হবে।';
+    body.appendChild(note);
+    openPanel('panelCalc');
+
+    $('calcRun').onclick = function () {
+      var overrides = {};
+      Object.keys(inputs).forEach(function (n) {
+        try {
+          var v = E.evaluate(inputs[n].value || '0', { angle: state.angle, vars: {} });
+          overrides[n] = E.C.isC(v) ? v.re : v;
+        } catch (e) { overrides[n] = 0; }
+      });
+      closePanel();
+      substituteAndEvaluate(overrides);
+    };
+  }
+
+  function substituteAndEvaluate(overrides) {
+    try {
+      var val = E.evaluate(state.expr, evalCtx(overrides));
+      state.rawValue = val;
+      state.result = E.formatValue(val, displayFormat());
+      state.isError = false;
+      var z = E.C.to(val);
+      if (Math.abs(z.im) < 1e-12) { state.ans = z.re; state._fraction = E.fractionOf(z.re); }
+      state.sdStage = 0;
+      state.history.unshift({ expr: state.expr, result: state.result, mode: state.mode, ts: Date.now() });
+      saveState(); renderHistory(); renderScreen();
+    } catch (e) {
+      state.result = e.message;
+      state.isError = true;
+      renderScreen();
+    }
+  }
+
+  /* ------------------------------------------------------------
+     physical keyboard
+     ------------------------------------------------------------ */
+  function onKeyDown(ev) {
+    var tag = (ev.target && ev.target.tagName) || '';
+    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (state.view !== 'calc') {
+      if (ev.key === 'Escape' && openPanelId) return;
+      return;
+    }
+    var k = ev.key;
+
+    if (/^[0-9.]$/.test(k)) { insert(k); ev.preventDefault(); return; }
+    if ('+-*/^()%'.indexOf(k) >= 0) { insert(k); ev.preventDefault(); return; }
+
+    switch (k) {
+      case 'Enter': case '=':
+        if (ev.shiftKey) toggleSD(); else evaluateCurrent();
+        ev.preventDefault(); return;
+      case 'Backspace': backspace(); ev.preventDefault(); return;
+      case 'Escape': if (openPanelId) closePanel(); else clearAll(); ev.preventDefault(); return;
+      case 'Delete': clearAll(); ev.preventDefault(); return;
+      case 'ArrowLeft': state.caret = Math.max(0, state.caret - 1); renderScreen(); ev.preventDefault(); return;
+      case 'ArrowRight': state.caret = Math.min(state.expr.length, state.caret + 1); renderScreen(); ev.preventDefault(); return;
+      case 'ArrowUp': histBrowse(-1); ev.preventDefault(); return;
+      case 'ArrowDown': histBrowse(1); ev.preventDefault(); return;
+      default: break;
+    }
+    if (k === 's' || k === 'S') { state.shift = !state.shift; state.alpha = false; renderKeypad(); renderScreen(); ev.preventDefault(); return; }
+    if (k === 'a' || k === 'A') { state.alpha = !state.alpha; state.shift = false; renderKeypad(); renderScreen(); ev.preventDefault(); return; }
+    if (k === 'p') { insert('π'); ev.preventDefault(); return; }
+    if (k === 'e') { insert('e'); ev.preventDefault(); return; }
+    if (k === 'i') { insert('i'); ev.preventDefault(); return; }
+    if (k === 'x' || k === 'y') { insert(k); ev.preventDefault(); return; }
+    if (/^[A-FM]$/.test(k)) { insert(k); ev.preventDefault(); return; }
+    if (k === ',') { insert(','); ev.preventDefault(); return; }
+  }
+
+  /* ------------------------------------------------------------
+     wiring
+     ------------------------------------------------------------ */
+  function wire() {
+    $('backToHome').addEventListener('click', function () { buildModelCards(); show('home'); });
+    $('backToModes').addEventListener('click', enterModes);
+    $('openSettings').addEventListener('click', openSettings);
+    $('openSettings2').addEventListener('click', openSettings);
+    $('openHistory2').addEventListener('click', function () { renderHistory(); openPanel('panelHistory'); });
+    $('openVars2').addEventListener('click', function () { openVars('insert'); });
+    $('openHelp2').addEventListener('click', function () { openPanel('panelHelp'); });
+
+    $('overlay').addEventListener('click', closePanel);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
+      b.addEventListener('click', closePanel);
+    });
 
     $('selAngle').addEventListener('change', function (e) {
-      state.angle = e.target.value;
-      $('btnDegRad').textContent = state.angle === 'deg' ? 'DEG' : state.angle === 'rad' ? 'RAD' : 'GRAD';
-      saveState(); renderScreen();
+      state.angle = e.target.value; saveState(); renderScreen();
     });
     $('selFormat').addEventListener('change', function (e) {
-      state.format = e.target.value;
-      if (state.lastRaw !== null) {
-        state.result = E.formatNumber(state.lastRaw, { format: state.format });
-        renderScreen();
-      }
-      saveState();
+      state.format = e.target.value; saveState();
+      if (state.rawValue != null) state.result = E.formatValue(state.rawValue, displayFormat());
+      renderScreen();
+    });
+    $('selComplex').addEventListener('change', function (e) {
+      state.complexFormat = e.target.value; saveState();
+      if (state.rawValue != null) state.result = E.formatValue(state.rawValue, displayFormat());
+      renderScreen();
     });
     $('selTheme').addEventListener('change', function (e) {
       state.theme = e.target.value;
@@ -600,76 +1095,64 @@
     $('selSound').addEventListener('change', function (e) {
       state.sound = e.target.value === 'on';
       saveState();
+      if (state.sound) click(820);
     });
-
-    $('btnSetup').addEventListener('click', function () { openPanel('panelSetup'); });
-    $('btnHistory').addEventListener('click', function () { renderHistory(); openPanel('panelHistory'); });
-    $('btnHelp').addEventListener('click', function () { openPanel('panelHelp'); });
-
-    $('btnDegRad').addEventListener('click', function () {
-      state.angle = state.angle === 'deg' ? 'rad' : state.angle === 'rad' ? 'grad' : 'deg';
-      $('selAngle').value = state.angle;
-      this.textContent = state.angle === 'deg' ? 'DEG' : state.angle === 'rad' ? 'RAD' : 'GRAD';
-      this.classList.toggle('on', state.angle !== 'deg');
-      saveState(); renderScreen();
+    $('selAutoFrac').addEventListener('change', function (e) {
+      state.autoFraction = e.target.value === 'on';
+      saveState();
+      if (state.rawValue != null) {
+        var z = E.C.to(state.rawValue);
+        state._fraction = Math.abs(z.im) < 1e-12 ? E.fractionOf(z.re) : null;
+        state.result = E.formatValue(state.rawValue, displayFormat());
+        if (state.autoFraction && state._fraction) { state.result = E.fractionText(state._fraction); state.sdStage = 1; }
+      }
+      renderScreen();
     });
-
+    $('selHaptic').addEventListener('change', function (e) {
+      state.haptic = e.target.value === 'on';
+      saveState();
+    });
     $('clearHistory').addEventListener('click', function () {
       state.history = [];
       saveState();
       renderHistory();
+      toast('History cleared');
     });
 
-    elOverlay.addEventListener('click', closePanel);
-    Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
-      b.addEventListener('click', closePanel);
-    });
-    document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape' && openPanelId) { closePanel(); ev.stopPropagation(); }
-    }, true);
+    document.addEventListener('keydown', onKeyDown);
   }
 
-  function wireModels() {
-    Array.prototype.forEach.call(document.querySelectorAll('.model-btn'), function (b) {
-      b.addEventListener('click', function () {
-        state.model = b.dataset.model;
-        state.shift = false;
-        state.alpha = false;
-        state.storeArmed = false;
-        renderModelButtons();
-        renderKeys();
-        renderScreen();
-        saveState();
-        click(700);
-      });
-    });
-  }
-
-  /* ---------------- boot ---------------- */
+  /* ------------------------------------------------------------
+     boot
+     ------------------------------------------------------------ */
   function boot() {
     loadState();
     document.body.dataset.model = state.model;
     document.body.dataset.theme = state.theme;
-    renderModelButtons();
-    renderKeys();
+    buildModelCards();
+    buildModeGrid();
+    wire();
+    renderKeypad();
     renderScreen();
     renderHistory();
-    wireModels();
-    wireSetup();
-    document.addEventListener('keydown', onKeyDown);
-    $('btnDegRad').textContent = state.angle === 'deg' ? 'DEG' : state.angle === 'rad' ? 'RAD' : 'GRAD';
-
-    // welcome hint
-    state.result = '0';
-    renderScreen();
+    show('home');
   }
+
+  window.MKJApp = {
+    state: state,
+    press: function (label) {
+      var layout = LAY[state.model];
+      var key = layout.keys.filter(function (k) { return k.l === label; })[0];
+      if (key) pressKey(key);
+      return key;
+    },
+    openMode: openMode,
+    evaluate: evaluateCurrent
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
   } else {
     boot();
   }
-
-  // expose for debugging
-  window.MKJApp = { state: state, pressKey: pressKey };
 })();
