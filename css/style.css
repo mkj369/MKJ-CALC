@@ -37,6 +37,7 @@ body {
   max-width: 430px; margin: 0 auto;
   padding: 6px 8px 8px;
   height: 100dvh; max-height: 100dvh; overflow: hidden;
+  justify-content: flex-start;
   display: flex; flex-direction: column; gap: 6px;
 }
 
@@ -57,6 +58,9 @@ body {
 /* ---------------- device ---------------- */
 .device {
   position: relative; flex: 1 1 auto; min-height: 0;
+  /* keep the real 1 : 2.1 device proportion on tall screens */
+  max-height: min(calc(100dvh - 52px), calc((min(100vw, 430px) - 16px) * 2.05));
+  align-self: center; width: 100%;
   display: flex; flex-direction: column;
   padding: 10px 11px 8px;
   border-radius: 22px 22px 14px 14px;
@@ -156,7 +160,7 @@ body {
 /* ---------------- keypad ---------------- */
 .pad {
   flex: 1 1 auto; min-height: 0; overflow: hidden;
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; justify-content: space-between;
   gap: 0 0;
   margin-top: 5px;
   --kw: 40px; --kg: 8px; --kgx: 4px; --kg2: 2px; --kb: 12px;
@@ -420,7 +424,7 @@ body[data-shape="classic"] .key { border-radius: 5px; }
 }
 
 .toast {
-  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%); z-index: 90;
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 90;
   max-width: 88vw; text-align: center; background: rgba(20,23,27,.97);
   border: 1px solid var(--line); color: var(--ink); font-size: 11px;
   padding: 7px 13px; border-radius: 999px; box-shadow: 0 8px 20px rgba(0,0,0,.55);
