@@ -653,10 +653,12 @@
         var alt = E.C.to(state.rawValue);
         if (Math.abs(alt.im) < 1e-12) {
           var pf = E.piFraction(alt.re);
-          if (pf && state.result.indexOf(pf) < 0) state.altText = pf;
-          else if (state._fraction && state.result.indexOf(E.fractionText(state._fraction)) < 0) {
-            state.altText = E.fractionText(state._fraction);
-          }
+          var frTxt = state._fraction ? E.fractionText(state._fraction) : null;
+          var decTxt = E.formatValue(alt.re, { format: 'norm', complex: false });
+          if (frTxt && state.result === frTxt) state.altText = decTxt;         // fraction → show decimal
+          else if (pf && state.result === pf) state.altText = decTxt;
+          else if (pf && state.result.indexOf(pf) < 0) state.altText = pf;
+          else if (frTxt && state.result.indexOf(frTxt) < 0) state.altText = frTxt;
         }
       }
       state.isError = false;

@@ -34,9 +34,9 @@
   var NAV = { nav: true };
 
   /* ------------------------------------------------------------
-     shared number block (7 → 0, DEL / AC, operators)
+     shared blocks
      ------------------------------------------------------------ */
-  function numberBlock(acShift) {
+  function numberBlock() {
     return [
       [
         K('7', '7', { c: 'num' }), K('8', '8', { c: 'num' }), K('9', '9', { c: 'num' }),
@@ -53,10 +53,32 @@
       ],
       [
         K('0', '0', { c: 'num' }), K('.', '.', { c: 'num', s: 'Ran#', sv: 'rand' }),
-        K('×10ˣ', '×10^(', { c: 'fn', sm: 'xs', s: 'π', sv: 'π' }),
-        CMD('Ans', 'ans', { c: 'fn', s: 'DRG', sv: 'drg' }),
+        K('(', '(', { c: 'op', s: '%', sv: '%' }),
+        K(')', ')', { c: 'op', s: ',', sv: ',' }),
         CMD('=', 'equals', { c: 'enter', s: '≈', sv: 'sd' })
       ]
+    ];
+  }
+
+  /* π e % M+ STO row */
+  function memoryRow() {
+    return [
+      K('π', 'π', { c: 'fn', s: 'e', sv: 'e' }),
+      K('e', 'e', { c: 'fn', s: 'i', sv: 'i' }),
+      K('%', '%', { c: 'fn', s: 'Abs', sv: 'Abs(' }),
+      CMD('M+', 'mplus', { c: 'fn', s: 'M−', sv: 'mminus', a: 'M', av: 'M' }),
+      CMD('STO', 'sto', { c: 'fn', s: 'RCL', sv: 'rcl' })
+    ];
+  }
+
+  /* ×10ˣ ENG DRG Ran# Ans row */
+  function utilityRow() {
+    return [
+      K('×10ˣ', '×10^(', { c: 'fn', sm: 'xs' }),
+      CMD('ENG', 'eng', { c: 'fn', sm: 'xs' }),
+      CMD('DRG', 'drg', { c: 'fn', sm: 'xs', s: 'SETUP', sv: 'settings' }),
+      CMD('Ran#', 'rand', { c: 'fn', sm: 'xs' }),
+      CMD('Ans', 'ans', { c: 'fn' })
     ];
   }
 
@@ -69,7 +91,7 @@
     plate: 'MKJ-991ES PLUS',
     model: 'MKJ-991ES',
     series: 'MKJ SERIES',
-    sub: 'NATURAL DISPLAY',
+    sub: 'NATURAL DISPLAY · 417 FUNCTIONS',
     foot: 'MKJ CALC · 991 ES Plus',
     cols: 5,
     shape: 'classic',
@@ -83,7 +105,7 @@
     rows: [
       [
         CMD('CALC', 'calc', { c: 'fn', sm: 'xs' }),
-        CMD('SOLVE', 'solve', { c: 'fn', sm: 'xs', s: 'SOLVE', sv: 'solve' }),
+        CMD('SOLVE', 'solve', { c: 'fn', sm: 'xs' }),
         K('∫dx', '∫(', { c: 'fn', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
         K('x²', '²', { c: 'fn', s: 'x³', sv: '³' }),
         K('x^', '^', { c: 'fn', s: 'ˣ√', sv: '^(1/' })
@@ -106,20 +128,14 @@
         K('x!', '!', { c: 'fn', s: 'nPr', sv: 'nPr(' }),
         K('nCr', 'nCr(', { c: 'fn', sm: 'sm', s: 'Π', sv: 'Π(' }),
         K('Σ', '∑(', { c: 'fn', s: 'Pol', sv: 'Pol(' }),
-        CMD('M+', 'mplus', { c: 'fn', s: 'M−', sv: 'mminus', a: 'M', av: 'M' }),
-        CMD('STO', 'sto', { c: 'fn', s: 'RCL', sv: 'rcl' })
-      ]
-    ].concat(numberBlock()),
-    extra: [
-      K('π', 'π', { c: 'fn', s: 'e', sv: 'e' }),
-      K('e', 'e', { c: 'fn', s: 'i', sv: 'i' }),
-      K('%', '%', { c: 'fn', s: 'Abs', sv: 'Abs(' }),
-      CMD('RCL', 'rcl', { c: 'fn' }),
-      CMD('ENG', 'eng', { c: 'fn', sm: 'xs' })
-    ],
-    modes: ['calc', 'complex', 'stat', 'matrix', 'vector', 'equation', 'inequality',
-            'dist', 'spreadsheet', 'basen', 'ratio', 'table', 'solve', 'verify',
-            'mathbox', 'constants']
+        K('x⁻¹', '^(-1)', { c: 'fn', sm: 'sm' }),
+        CMD('S⇔D', 'sd', { c: 'fn', sm: 'sm' })
+      ],
+      memoryRow()
+    ].concat(numberBlock(), [utilityRow()]),
+    modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
+            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
+            'verify', 'mathbox', 'constants']
   };
 
   /* ------------------------------------------------------------
@@ -146,7 +162,7 @@
       [
         CMD('CALC', 'calc', { c: 'fn', sm: 'xs' }),
         CMD('SOLVE', 'solve', { c: 'fn', sm: 'xs' }),
-        CMD('S⇔D', 'sd', { c: 'fn', sm: 'sm' }),
+        K('∫dx', '∫(', { c: 'fn', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
         K('x²', '²', { c: 'fn', s: 'x³', sv: '³' }),
         K('x^', '^', { c: 'fn', s: 'ˣ√', sv: '^(1/' })
       ],
@@ -167,21 +183,15 @@
       [
         K('Abs', 'Abs(', { c: 'fn', s: 'Conjg', sv: 'Conjg(' }),
         K('nCr', 'nCr(', { c: 'fn', sm: 'sm', s: 'nPr', sv: 'nPr(' }),
-        K('∫dx', '∫(', { c: 'fn', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
         K('Σ', '∑(', { c: 'fn', s: 'Π', sv: 'Π(' }),
-        CMD('STO', 'sto', { c: 'fn', s: 'RCL', sv: 'rcl', a: 'M', av: 'M' })
-      ]
-    ].concat(numberBlock()),
-    extra: [
-      K('π', 'π', { c: 'fn', s: 'e', sv: 'e' }),
-      K('e', 'e', { c: 'fn', s: 'i', sv: 'i' }),
-      K('%', '%', { c: 'fn', s: 'Abs', sv: 'Abs(' }),
-      CMD('RCL', 'rcl', { c: 'fn' }),
-      CMD('ENG', 'eng', { c: 'fn', sm: 'xs' })
-    ],
-    modes: ['calc', 'complex', 'stat', 'matrix', 'vector', 'equation', 'inequality',
-            'dist', 'spreadsheet', 'basen', 'ratio', 'table', 'solve', 'verify',
-            'mathbox', 'constants']
+        K('Pol', 'Pol(', { c: 'fn', sm: 'sm', s: 'Rec', sv: 'Rec(' }),
+        CMD('S⇔D', 'sd', { c: 'fn', sm: 'sm' })
+      ],
+      memoryRow()
+    ].concat(numberBlock(), [utilityRow()]),
+    modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
+            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
+            'verify', 'mathbox', 'constants']
   };
 
   /* ------------------------------------------------------------
@@ -231,19 +241,13 @@
         K('nCr', 'nCr(', { c: 'cw-fn', shape: 'circle', sm: 'xs', s: 'nPr', sv: 'nPr(' }),
         K('∫', '∫(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
         K('Σ', '∑(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'Π', sv: 'Π(' }),
-        CMD('STO', 'sto', { c: 'cw-fn', shape: 'circle', sm: 'xs', s: 'RCL', sv: 'rcl', a: 'M', av: 'M' })
-      ]
-    ].concat(numberBlock()),
-    extra: [
-      K('π', 'π', { c: 'fn', s: 'e', sv: 'e' }),
-      K('e', 'e', { c: 'fn', s: 'i', sv: 'i' }),
-      K('%', '%', { c: 'fn', s: 'Abs', sv: 'Abs(' }),
-      K('°′″', '°', { c: 'fn', sm: 'sm', s: 'ENG', sv: 'eng' }),
-      CMD('M+', 'mplus', { c: 'fn', s: 'M−', sv: 'mminus' })
-    ],
-    modes: ['calc', 'complex', 'stat', 'matrix', 'vector', 'equation', 'inequality',
-            'dist', 'spreadsheet', 'basen', 'ratio', 'table', 'solve', 'verify',
-            'mathbox', 'constants']
+        K('°′″', '°', { c: 'cw-fn', shape: 'circle', sm: 'xs', s: 'ENG', sv: 'eng' })
+      ],
+      memoryRow()
+    ].concat(numberBlock(), [utilityRow()]),
+    modes: ['calc', 'complex', 'stat', 'dist', 'matrix', 'vector', 'equation',
+            'inequality', 'basen', 'ratio', 'table', 'spreadsheet', 'solve',
+            'verify', 'mathbox', 'constants']
   };
 
   /* ------------------------------------------------------------
