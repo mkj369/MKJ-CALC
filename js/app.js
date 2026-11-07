@@ -1,6 +1,5 @@
 /* ============================================================
-   MKJ CALC — app controller v2
-   Router (home → modes → calculator) + input + evaluation
+   MKJ CALC — controller v4 (fast, mobile first)
    ============================================================ */
 (function () {
   'use strict';
@@ -8,24 +7,18 @@
   var E = window.MKJEngine;
   var LAY = window.MKJLayouts;
   var MODES = window.MKJModes;
-
   var $ = function (id) { return document.getElementById(id); };
 
-  /* ------------------------------------------------------------
-     state
-     ------------------------------------------------------------ */
-  var state = {
+  /* ---------------- state ---------------- */
+  var S = {
     model: 'esplus',
     mode: 'calc',
-    view: 'home',
     angle: 'deg',
     format: 'norm',
     complexFormat: 'rect',
     theme: 'dark',
     sound: true,
     haptic: true,
-    autoFraction: true,
-
     expr: '',
     caret: 0,
     ans: 0,
@@ -34,1214 +27,827 @@
     alpha: false,
     storeArmed: false,
     result: '0',
+    resultSub: '',
     isError: false,
-    rawValue: null,
+    raw: null,
     sdStage: 0,
+    frac: null,
     history: [],
-    histIndex: -1,
-    memory: 0
+    varMode: 'insert'
   };
 
-  var STORE_KEY = 'mkjcalc.v2';
+  var KEY = 'mkjcalc.v4';
 
-  function saveState() {
+  function save() {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({
-        model: state.model,
-        angle: state.angle,
-        format: state.format,
-        complexFormat: state.complexFormat,
-        theme: state.theme,
-        sound: state.sound,
-        haptic: state.haptic,
-        autoFraction: state.autoFraction,
-        vars: state.vars,
-        history: state.history.slice(0, 80),
-        matrices: state.matrices,
-        vectors: state.vectors,
-        tableExpr: state.tableExpr,
-        tableStart: state.tableStart,
-        tableEnd: state.tableEnd,
-        tableStep: state.tableStep,
-        statX: state.statX, statY: state.statY,
-        solveExpr: state.solveExpr
+      localStorage.setItem(KEY, JSON.stringify({
+        model: S.model, angle: S.angle, format: S.format,
+        complexFormat: S.complexFormat, theme: S.theme,
+        sound: S.sound, haptic: S.haptic,
+        vars: S.vars, history: S.history.slice(0, 60)
       }));
-    } catch (e) { /* quota / private mode */ }
+    } catch (e) {}
   }
-
-  function loadState() {
+  function load() {
     try {
-      var raw = localStorage.getItem(STORE_KEY);
-      if (!raw) return;
-      var s = JSON.parse(raw);
+      var d = JSON.parse(localStorage.getItem(KEY) || '{}');
       ['model', 'angle', 'format', 'complexFormat', 'theme'].forEach(function (k) {
-        if (s[k]) state[k] = s[k];
+        if (d[k]) S[k] = d[k];
       });
-      if (typeof s.autoFraction === 'boolean') state.autoFraction = s.autoFraction;
-      ['sound', 'haptic'].forEach(function (k) {
-        if (typeof s[k] === 'boolean') state[k] = s[k];
+      if (typeof d.sound === 'boolean') S.sound = d.sound;
+      if (typeof d.haptic === 'boolean') S.haptic = d.haptic;
+      if (d.vars) Object.keys(S.vars).forEach(function (k) {
+        if (typeof d.vars[k] === 'number') S.vars[k] = d.vars[k];
       });
-      if (s.vars) Object.keys(state.vars).forEach(function (k) {
-        if (typeof s.vars[k] === 'number') state.vars[k] = s.vars[k];
-      });
-      if (Array.isArray(s.history)) state.history = s.history;
-      if (state.history.length) state.histIndex = -1;
-      ['matrices', 'vectors', 'tableExpr', 'tableStart', 'tableEnd', 'tableStep',
-       'statX', 'statY', 'solveExpr'].forEach(function (k) {
-        if (s[k] !== undefined) state[k] = s[k];
-      });
-      if (!LAY[state.model]) state.model = 'esplus';
-    } catch (e) { /* ignore */ }
+      if (Array.isArray(d.history)) S.history = d.history;
+      if (!LAY[S.model]) S.model = 'esplus';
+    } catch (e) {}
   }
 
-  /* ------------------------------------------------------------
-     audio + haptics
-     ------------------------------------------------------------ */
-  var audioCtx = null;
-  function click(freq) {
-    if (!state.sound) return;
+  /* ---------------- sound / haptics ---------------- */
+  var ac = null;
+  function beep(freq) {
+    if (!S.sound) return;
     try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      var t = audioCtx.currentTime;
-      var osc = audioCtx.createOscillator();
-      var gain = audioCtx.createGain();
-      osc.type = 'square';
-      osc.frequency.value = freq || 820;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.045, t + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start(t);
-      osc.stop(t + 0.05);
-    } catch (e) { /* ignore */ }
+      if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+      if (ac.state === 'suspended') ac.resume();
+      var t = ac.currentTime;
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square';
+      o.frequency.value = freq || 900;
+      g.gain.setValueAtTime(.0001, t);
+      g.gain.exponentialRampToValueAtTime(.04, t + .004);
+      g.gain.exponentialRampToValueAtTime(.0001, t + .04);
+      o.connect(g); g.connect(ac.destination);
+      o.start(t); o.stop(t + .05);
+    } catch (e) {}
+  }
+  function buzz() {
+    if (S.haptic && navigator.vibrate) { try { navigator.vibrate(6); } catch (e) {} }
   }
 
-  function haptic(ms) {
-    if (!state.haptic) return;
-    if (navigator.vibrate) { try { navigator.vibrate(ms || 8); } catch (e) { /* ignore */ } }
-  }
-
-  /* ------------------------------------------------------------
-     toast
-     ------------------------------------------------------------ */
-  var toastTimer = null;
+  var toastT = null;
   function toast(msg) {
     var t = $('toast');
-    if (!t) return;
     t.textContent = msg;
     t.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, 1600);
+    clearTimeout(toastT);
+    toastT = setTimeout(function () { t.hidden = true; }, 1500);
   }
 
-  /* ------------------------------------------------------------
-     router
-     ------------------------------------------------------------ */
-  function show(view) {
-    state.view = view;
-    $('viewHome').hidden = view !== 'home';
-    $('viewModes').hidden = view !== 'modes';
-    $('viewCalc').hidden = view !== 'calc';
-    document.body.dataset.view = view;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  /* ---------------- sheets ---------------- */
+  var openSheet = null;
+  function show(id) {
+    if (openSheet) $(openSheet).hidden = true;
+    openSheet = id;
+    if (!id) { $('scrim').hidden = true; return; }
+    $('scrim').hidden = false;
+    $(id).hidden = false;
+  }
+  function closeSheet() { show(null); }
+
+  /* ---------------- LCD ---------------- */
+  function fmtOpts() {
+    return {
+      format: S.format,
+      complex: S.mode === 'complex' || S.mode === 'equation',
+      complexFormat: S.complexFormat,
+      angle: S.angle
+    };
   }
 
-  /* ------------------------------------------------------------
-     model picker
-     ------------------------------------------------------------ */
-  var MODEL_META = {
-    esplus: {
-      name: '991 ES Plus',
-      desc: 'Classic pad · natural display · 16 modes',
-      tags: ['Classic pad', '∫ / d/dx', 'STO · RCL'],
-      accent: '#ff9b3d', screen: ['#c9d8c4', '#a9bba4'],
-      shape: 'classic', rows: 4, round: false
-    },
-    explus: {
-      name: '991 EX Plus',
-      desc: 'ClassWiz pad · menu keys · spreadsheet',
-      tags: ['ClassWiz', 'Spreadsheet', '4×4 matrix'],
-      accent: '#47b3ff', screen: ['#cfe0e6', '#b3c8d0'],
-      shape: 'classwiz', rows: 4, round: false
-    },
-    cw: {
-      name: '991 CW',
-      desc: 'Flat pad · circular keys · HOME menu',
-      tags: ['Circular keys', 'Math Box', '4-gradation'],
-      accent: '#7de2c3', screen: ['#c4d3d0', '#a9bbb7'],
-      shape: 'cw', rows: 4, round: true
-    }
-  };
+  function paintExpr() {
+    var b = S.expr.slice(0, S.caret);
+    var a = S.expr.slice(S.caret);
+    $('exprBefore').textContent = b;
+    var c = $('caretChar');
+    var ch = a.charAt(0);
+    c.textContent = ch || ' ';
+    c.className = 'cur' + (S.shift ? '' : '');
+    $('exprAfter').textContent = a.slice(1);
+    $('lcd').scrollLeft = 0;
+  }
 
-  function buildModelCards() {
-    var host = $('modelCards');
-    host.innerHTML = '';
-    LAY.order.forEach(function (id) {
-      var meta = MODEL_META[id];
-      var card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'model-card' + (state.model === id ? ' selected' : '');
-      card.style.setProperty('--mc', meta.accent);
-      card.style.setProperty('--mc-screen', meta.screen[0]);
-      card.style.setProperty('--mc-screen2', meta.screen[1]);
+  function paint() {
+    var lay = LAY[S.model];
+    $('topPlate').textContent = lay.plate;
+    $('plateModel').textContent = lay.model;
+    $('plateSeries').textContent = lay.series;
+    $('plateSub').textContent = lay.sub;
+    $('topMode').textContent = (MODES[S.mode] || MODES.calc).name;
+    $('lcdMode').textContent = ({
+      calc: 'COMP', complex: 'CMPLX', stat: 'STAT', dist: 'DIST', matrix: 'MATRIX',
+      vector: 'VECTOR', equation: 'EQN', inequality: 'INEQ', basen: 'BASE',
+      ratio: 'RATIO', table: 'TABLE', spreadsheet: 'SHEET', solve: 'SOLVE',
+      verify: 'VERIFY', mathbox: 'MATH', constants: 'CONST'
+    })[S.mode] || 'COMP';
+    $('lcdAngle').textContent = S.angle === 'deg' ? 'D' : S.angle === 'rad' ? 'R' : 'G';
 
-      var prev = document.createElement('div');
-      prev.className = 'mc-preview shape-' + meta.shape;
-      prev.innerHTML =
-        '<div class="mc-brand">MKJ</div>' +
-        '<div class="mc-screen"></div>' +
-        '<div class="mc-pad">' +
-          '<span class="mc-nav"></span>' +
-        '</div>' +
-        '<div class="mc-keys ' + (meta.round ? 'round' : '') + '">' +
-          new Array(16).fill('<i></i>').join('') +
-        '</div>';
-
-      var body = document.createElement('div');
-      body.className = 'mc-body';
-      body.innerHTML =
-        '<div class="mc-name">MKJ · ' + meta.name + '</div>' +
-        '<div class="mc-desc">' + meta.desc + '</div>' +
-        '<div class="mc-tags">' + meta.tags.map(function (t) {
-          return '<span class="mc-tag">' + t + '</span>';
-        }).join('') + '</div>';
-
-      var go = document.createElement('div');
-      go.className = 'mc-go';
-      go.textContent = '›';
-
-      card.appendChild(prev);
-      card.appendChild(body);
-      card.appendChild(go);
-      card.addEventListener('click', function () {
-        state.model = id;
-        saveState();
-        click(680);
-        buildModelCards();
-        enterModes();
-      });
-      host.appendChild(card);
+    var flags = { S: S.shift, A: S.alpha, M: S.vars.M !== 0, STO: S.storeArmed, i: S.complexFormat === 'polar' };
+    Array.prototype.forEach.call($('lcd').querySelectorAll('.flags span'), function (el) {
+      if (flags[el.dataset.f]) el.classList.add('on'); else el.classList.remove('on');
     });
+
+    paintExpr();
+    var r = $('result');
+    r.textContent = S.result;
+    r.className = 'lcd-res' + (S.isError ? ' err' : '') +
+      (S.result.length > 24 ? ' xs' : S.result.length > 13 ? ' sm' : '');
+    $('resultSub').textContent = S.resultSub || '';
+    document.body.classList.toggle('shift-on', S.shift);
+    document.body.classList.toggle('alpha-on', S.alpha);
   }
 
-  /* ------------------------------------------------------------
-     mode grid
-     ------------------------------------------------------------ */
-  function buildModeGrid() {
-    var layout = LAY[state.model];
-    var grid = $('modeGrid');
-    grid.innerHTML = '';
-    $('barModel').textContent = layout.plate;
-    document.body.dataset.model = state.model;
-
-    MODES.order.forEach(function (id) {
-      var m = MODES[id];
-      if (!m) return;
-      if (m.models && m.models.indexOf(state.model) < 0) return;
-      var card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'mode-card';
-      card.style.setProperty('--mcc', m.color);
-      card.innerHTML =
-        '<div class="mode-icon">' + m.icon + '</div>' +
-        '<div class="mode-name">' + m.name + '</div>' +
-        '<div class="mode-desc">' + m.desc + '</div>';
-      card.addEventListener('click', function () {
-        click(700);
-        openMode(id);
-      });
-      grid.appendChild(card);
-    });
+  /* ---------------- keypad ---------------- */
+  function el(tag, cls, txt) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt !== undefined) n.textContent = txt;
+    return n;
   }
 
-  function enterModes() {
-    buildModeGrid();
-    show('modes');
-  }
+  function keyEl(key) {
+    var b = el('button', 'key ' + (key.c || ''));
+    if (key.shape) b.classList.add(key.shape);
+    if (key.s) b.classList.add('has-shift');
+    if (key.span > 1) b.classList.add('wide');
 
-  /* ------------------------------------------------------------
-     keypad
-     ------------------------------------------------------------ */
-  function buildCompactKeypad() {
-    var wrap = document.createElement('div');
-    wrap.className = 'compact-pad';
-    var bar = document.createElement('div');
-    bar.className = 'compact-actions';
-    [
-      ['AC', 'ac', 'ac'], ['DEL', 'del', 'del'], ['=', 'equals', 'enter']
-    ].forEach(function (item) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'ck ' + item[2];
-      b.textContent = item[0];
-      b.addEventListener('click', function () {
-        click(700); haptic(8);
-        runCommand(item[1]);
-      });
-      bar.appendChild(b);
-    });
-    wrap.appendChild(bar);
-
-    var pad = document.createElement('div');
-    pad.className = 'compact-keys';
-    ['7', '8', '9', '×', '4', '5', '6', '÷', '1', '2', '3', '+', '0', '.', '(', '−']
-      .forEach(function (label) {
-        var b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'ck';
-        b.textContent = label;
-        b.addEventListener('click', function () {
-          click(840); haptic(8);
-          insert(label === '×' ? '*' : label === '÷' ? '/' : label === '−' ? '-' : label);
-        });
-        pad.appendChild(b);
-      });
-    wrap.appendChild(pad);
-    return wrap;
-  }
-
-  /* build one key button */
-  function makeKey(key) {
-    var b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'key ' + (key.c || '');
-    if (key.shape) b.classList.add('shape-' + key.shape);
-    if (key.span > 1) b.classList.add(key.span === 2 ? 'wide' : 'wide3');
-
-    if (key.s) {
-      var sh = document.createElement('span');
-      sh.className = 'k-shift';
-      sh.textContent = key.s;
-      b.appendChild(sh);
-    }
-    if (key.a) {
-      var al = document.createElement('span');
-      al.className = 'k-alpha';
-      al.textContent = key.a;
-      b.appendChild(al);
-    }
-    var lab = document.createElement('span');
-    lab.className = 'k-label ' + (key.sm || '');
-    lab.textContent = key.l;
-    b.appendChild(lab);
+    if (key.s) b.appendChild(el('span', 'sh', key.s));
+    if (key.a) b.appendChild(el('span', 'al', key.a));
+    b.appendChild(el('span', 'lab ' + (key.sm || ''), key.l));
 
     b.addEventListener('click', function (ev) {
       ev.preventDefault();
-      pressKey(key);
-      b.classList.add('flashkey');
-      setTimeout(function () { b.classList.remove('flashkey'); }, 260);
-    });
+      beep(key.act === 'cmd' ? 640 : 880);
+      buzz();
+      press(key);
+    }, { passive: false });
     return b;
   }
 
-  /* navigation pad: ▲ ◀ ▶ ▼ around a round centre */
-  function makeNavPad() {
-    var pad = document.createElement('div');
-    pad.className = 'navpad';
-    var spec = [
-      ['', 'nav-spacer nav-a'], ['▲', 'nav-up'], ['', 'nav-spacer nav-b'],
-      ['◀', 'nav-left'], ['', 'nav-centre'], ['▶', 'nav-right'],
-      ['', 'nav-spacer nav-c'], ['▼', 'nav-down'], ['', 'nav-spacer nav-d']
-    ];
-    spec.forEach(function (item) {
-      if (item[0] === '') {
-        var sp = document.createElement('span');
-        sp.className = item[1];
-        pad.appendChild(sp);
-        return;
-      }
-      var b = document.createElement('button');
+  function navPad() {
+    var n = el('div', 'nav');
+    var order = [['', ''], ['▲', 'up'], ['', ''], ['◀', 'left'], ['•', 'enter'], ['▶', 'right'], ['', ''], ['▼', 'down'], ['', '']];
+    order.forEach(function (o) {
+      if (!o[1]) { n.appendChild(el('span')); return; }
+      var b = el('button', o[1] === 'enter' ? 'centre' : '', o[0] === '•' ? '' : o[0]);
       b.type = 'button';
-      b.className = 'nav-key ' + item[1];
-      b.textContent = item[0];
-      var cmd = item[1] === 'nav-up' ? 'up' : item[1] === 'nav-down' ? 'down'
-              : item[1] === 'nav-left' ? 'left' : 'right';
-      b.addEventListener('click', function () {
-        click(640); haptic(6);
-        runCommand(cmd);
-      });
-      pad.appendChild(b);
+      b.addEventListener('click', function () { beep(700); run(o[1]); });
+      n.appendChild(b);
     });
-    var centre = pad.querySelector('.nav-centre');
-    centre.addEventListener('click', function () { click(700); evaluateCurrent(); });
-    return pad;
+    return n;
   }
 
-  function renderKeypad() {
-    renderKeypadInto($('keypad'), true);
-  }
-
-  function renderKeypadInto(pad, withDevice) {
-    var layout = LAY[state.model];
+  function buildPad() {
+    var lay = LAY[S.model];
+    var pad = $('pad');
     pad.innerHTML = '';
-    if (pad.id === 'keypad') pad.classList.toggle('cols-6', layout.cols === 6);
 
-    /* ---- upper cluster: SHIFT / ALPHA · nav pad · MENU · ON ---- */
-    if (withDevice) {
-      var cluster = document.createElement('div');
-      cluster.className = 'key-cluster';
+    var cluster = el('div', 'cluster');
+    var l = el('div', 'cl-l');
+    l.appendChild(keyEl(lay.top[0]));
+    l.appendChild(keyEl(lay.top[1]));
+    cluster.appendChild(l);
+    cluster.appendChild(navPad());
+    var r = el('div', 'cl-r');
+    r.appendChild(keyEl(lay.top[3]));
+    r.appendChild(keyEl(lay.top[4]));
+    cluster.appendChild(r);
+    pad.appendChild(cluster);
 
-      var left = document.createElement('div');
-      left.className = 'cluster-left';
-      left.appendChild(makeKey(layout.top[0]));
-      left.appendChild(makeKey(layout.top[1]));
-      cluster.appendChild(left);
-
-      cluster.appendChild(makeNavPad());
-
-      var right = document.createElement('div');
-      right.className = 'cluster-right';
-      var menuKey = layout.top[3];
-      var onKey = layout.top[4];
-      menuKey.shape = menuKey.shape || 'round';
-      onKey.shape = onKey.shape || 'round';
-      right.appendChild(makeKey(menuKey));
-      right.appendChild(makeKey(onKey));
-      cluster.appendChild(right);
-
-      pad.appendChild(cluster);
-    }
-
-    /* ---- main rows ---- */
-    layout.rows.forEach(function (row) {
-      row.forEach(function (key) {
-        pad.appendChild(makeKey(key));
-      });
+    lay.rows.forEach(function (row) {
+      row.forEach(function (k) { pad.appendChild(keyEl(k)); });
     });
-
-    document.body.classList.toggle('shift-on', state.shift);
-    document.body.classList.toggle('alpha-on', state.alpha);
-    document.body.dataset.shape = layout.shape || 'classic';
+    document.body.dataset.model = S.model;
   }
 
-  /* press a key, honouring SHIFT / ALPHA modifiers */
-  function pressKey(key) {
-    click(key.act === 'cmd' ? 620 : 840);
-    haptic(8);
-
-    if (key.act === 'cmd' && key.v === 'shift') {
-      state.shift = !state.shift;
-      state.alpha = false;
-      renderScreen(); renderKeypad();
-      return;
+  /* ---------------- input ---------------- */
+  function insert(txt) {
+    if (txt == null) return;
+    if (S.storeArmed) {
+      if (/^[A-FM]$/.test(txt)) { storeTo(txt); return; }
+      S.storeArmed = false;
     }
-    if (key.act === 'cmd' && key.v === 'alpha') {
-      state.alpha = !state.alpha;
-      state.shift = false;
-      renderScreen(); renderKeypad();
-      return;
-    }
-    if (state.shift && key.s) {
-      state.shift = false;
-      if (key.sv) {
-        if (isCmd(key.sv)) runCommand(key.sv);
-        else insert(key.sv);
-      } else {
-        toast(key.s + ' has no function on this model');
-      }
-      renderKeypad();
-      return;
-    }
-    if (state.alpha && key.a) {
-      state.alpha = false;
-      insert(key.av || key.a);
-      renderKeypad();
-      return;
-    }
-    if (state.shift || state.alpha) {
-      state.shift = false;
-      state.alpha = false;
-      renderKeypad();
-    }
-
-    if (key.act === 'cmd') runCommand(key.v);
-    else insert(key.v);
+    S.expr = S.expr.slice(0, S.caret) + txt + S.expr.slice(S.caret);
+    S.caret += txt.length;
+    S.isError = false;
+    paint();
   }
 
-  var COMMANDS = {
+  var TOKENS = ['sin⁻¹(', 'cos⁻¹(', 'tan⁻¹(', 'sinh⁻¹(', 'cosh⁻¹(', 'tanh⁻¹(',
+    'sin(', 'cos(', 'tan(', 'sinh(', 'cosh(', 'tanh(', 'log(', 'ln(', 'exp(',
+    'Abs(', 'Conjg(', 'Arg(', 'Re(', 'Im(', 'nCr(', 'nPr(', 'gcd(', 'lcm(',
+    'Pol(', 'Rec(', 'randInt(', 'round(', 'floor(', 'ceil(', 'frac(', 'sign(',
+    'min(', 'max(', '∑(', 'Π(', '∫(', 'd/dx(', '√(', '∛(', '×10^(', '^(1/', '^(-1)'];
+
+  function del() {
+    if (!S.caret) return;
+    var left = S.expr.slice(0, S.caret);
+    var cut = 1;
+    for (var i = 0; i < TOKENS.length; i++) {
+      if (left.slice(-TOKENS[i].length) === TOKENS[i]) { cut = TOKENS[i].length; break; }
+    }
+    S.expr = S.expr.slice(0, S.caret - cut) + S.expr.slice(S.caret);
+    S.caret -= cut;
+    S.isError = false;
+    paint();
+  }
+
+  function clearAll() {
+    S.expr = '';
+    S.caret = 0;
+    S.result = '0';
+    S.resultSub = '';
+    S.isError = false;
+    S.raw = null;
+    S.frac = null;
+    S.sdStage = 0;
+    S.shift = false;
+    S.alpha = false;
+    S.storeArmed = false;
+    paint();
+  }
+
+  /* ---------------- evaluate ---------------- */
+  function ctx(extra) {
+    var vars = {};
+    Object.keys(S.vars).forEach(function (k) { vars[k] = S.vars[k]; });
+    if (extra) Object.keys(extra).forEach(function (k) { vars[k] = extra[k]; });
+    return {
+      angle: S.angle, ans: S.ans, vars: vars,
+      complex: S.mode === 'complex' || S.mode === 'equation'
+    };
+  }
+
+  function showValue(v) {
+    var z = E.C.isPair(v) ? null : E.C.to(v);
+    S.raw = v;
+    if (z && Math.abs(z.im) < 1e-12) {
+      S.ans = z.re;
+      S.frac = E.fractionOf(z.re);
+    } else {
+      S.frac = null;
+    }
+    if (!z) S.ans = 0;
+
+    S.result = E.formatValue(v, fmtOpts());
+    S.sdStage = 0;
+
+    /* second line: alternative form */
+    S.resultSub = '';
+    if (z && Math.abs(z.im) < 1e-12) {
+      var fr = S.frac ? E.fractionText(S.frac) : null;
+      var pi = E.piFraction(z.re);
+      var dec = E.formatValue(z.re, { format: 'norm', complex: false });
+      if (fr && S.result === fr) S.resultSub = dec;
+      else if (pi && S.result === pi) S.resultSub = dec;
+      else if (pi) S.resultSub = pi;
+      else if (fr) S.resultSub = fr;
+    }
+    S.isError = false;
+  }
+
+  function equals() {
+    var src = S.expr.trim();
+    if (!src) { S.result = E.formatValue(S.ans, fmtOpts()); paint(); return; }
+    try {
+      var v = E.evaluate(src, ctx());
+      showValue(v);
+      S.history.unshift({ e: src, r: S.result });
+      if (S.history.length > 60) S.history.pop();
+      save();
+      beep(1100);
+      paint();
+    } catch (err) {
+      S.result = (err && err.message) || 'Math ERROR';
+      S.resultSub = '';
+      S.isError = true;
+      beep(200);
+      paint();
+    }
+  }
+
+  function toggleSD() {
+    if (S.raw == null) { equals(); return; }
+    if (E.C.isPair(S.raw)) { toast('Result is a pair'); return; }
+    var z = E.C.to(S.raw);
+    if (Math.abs(z.im) > 1e-12) {
+      S.complexFormat = S.complexFormat === 'rect' ? 'polar' : 'rect';
+      $('setComplex').value = S.complexFormat;
+      S.result = E.formatValue(S.raw, fmtOpts());
+      paint(); save();
+      return;
+    }
+    var x = z.re;
+    var forms = [E.formatValue(x, { format: 'norm', complex: false })];
+    var fr = E.fractionOf(x);
+    if (fr) forms.push(E.fractionText(fr));
+    var pi = E.piFraction(x);
+    if (pi && forms.indexOf(pi) < 0) forms.push(pi);
+    if (forms.length < 2) { toast('No other form'); return; }
+    S.sdStage = (S.sdStage + 1) % forms.length;
+    S.result = forms[S.sdStage];
+    paint();
+  }
+
+  function storeTo(name) {
+    S.vars[name] = S.ans;
+    S.storeArmed = false;
+    S.result = E.formatValue(S.ans, fmtOpts());
+    paint(); save();
+    toast('Ans → ' + name);
+  }
+
+  /* ---------------- key press ---------------- */
+  var CMD = {
     off: 1, on: 1, ac: 1, del: 1, equals: 1, sd: 1, left: 1, right: 1, up: 1, down: 1,
     mode: 1, home: 1, settings: 1, tools: 1, catalog: 1, variable: 1, ans: 1,
     mplus: 1, mminus: 1, sto: 1, rcl: 1, eng: 1, drg: 1, calc: 1, solve: 1, rand: 1,
     shift: 1, alpha: 1
   };
-  function isCmd(v) { return typeof v === 'string' && COMMANDS[v] === 1; }
 
-  /* ------------------------------------------------------------
-     expression input
-     ------------------------------------------------------------ */
-  function insert(text) {
-    if (text == null) return;
-    if (state.storeArmed) {
-      if (/^[A-FM]$/.test(text)) { storeTo(text); return; }
-      state.storeArmed = false;
+  function press(key) {
+    if (key.act === 'cmd' && key.v === 'shift') {
+      S.shift = !S.shift; S.alpha = false; paint(); return;
     }
-    state.expr = state.expr.slice(0, state.caret) + text + state.expr.slice(state.caret);
-    state.caret += text.length;
-    state.isError = false;
-    state.sdStage = 0;
-    renderScreen();
-  }
-
-  function backspace() {
-    if (!state.caret) return;
-    var left = state.expr.slice(0, state.caret);
-    var tokens = [
-      'sin⁻¹(', 'cos⁻¹(', 'tan⁻¹(', 'sinh⁻¹(', 'cosh⁻¹(', 'tanh⁻¹(',
-      'sin(', 'cos(', 'tan(', 'sinh(', 'cosh(', 'tanh(',
-      'log(', 'ln(', 'exp(', 'Abs(', 'Conjg(', 'Arg(', 'Re(', 'Im(',
-      'nCr(', 'nPr(', 'gcd(', 'lcm(', 'Pol(', 'Rec(', 'randInt(',
-      'round(', 'floor(', 'ceil(', 'frac(', 'sign(', 'min(', 'max(',
-      '∑(', 'Π(', '∫(', 'd/dx(', '√(', '∛(', '×10^(', '^(1/', '^(-1)'
-    ];
-    var cut = 1;
-    for (var i = 0; i < tokens.length; i++) {
-      if (left.slice(-tokens[i].length) === tokens[i]) { cut = tokens[i].length; break; }
+    if (key.act === 'cmd' && key.v === 'alpha') {
+      S.alpha = !S.alpha; S.shift = false; paint(); return;
     }
-    state.expr = state.expr.slice(0, state.caret - cut) + state.expr.slice(state.caret);
-    state.caret -= cut;
-    state.isError = false;
-    state.sdStage = 0;
-    renderScreen();
-  }
-
-  function clearAll() {
-    state.expr = '';
-    state.caret = 0;
-    state.result = '0';
-    state.altText = '';
-    state.isError = false;
-    state.rawValue = null;
-    state.sdStage = 0;
-    state.shift = false;
-    state.alpha = false;
-    state.storeArmed = false;
-    state.histIndex = -1;
-    renderScreen(); renderKeypad();
-  }
-
-  /* ------------------------------------------------------------
-     screen rendering
-     ------------------------------------------------------------ */
-  function renderScreen() {
-    var layout = LAY[state.model];
-    $('plateModel').textContent = layout.model || layout.plate;
-    $('plateSeries').textContent = layout.series || '';
-    $('plateSub').textContent = layout.sub;
-    $('footModel').textContent = layout.foot;
-    $('calcSubtitle').textContent = layout.plate;
-    $('calcTitle').textContent = (MODES[state.mode] || MODES.calc).name;
-
-    var before = state.expr.slice(0, state.caret);
-    var after = state.expr.slice(state.caret);
-    var exprEl = $('expr');
-    exprEl.innerHTML = '';
-    var s1 = document.createElement('span');
-    s1.textContent = before;
-    var c = document.createElement('span');
-    c.className = 'caret-char';
-    var nextChar = after.charAt(0);
-    c.textContent = nextChar || ' ';
-    if (nextChar) c.classList.add('caret-on');
-    var s2 = document.createElement('span');
-    s2.textContent = after.slice(1);
-    exprEl.appendChild(s1); exprEl.appendChild(c); exprEl.appendChild(s2);
-
-    var res = $('result');
-    res.textContent = state.result;
-    var res2 = $('result2');
-    if (res2) res2.textContent = state.altText || '';
-    res.className = 'result' +
-      (state.isError ? ' error' : '') +
-      (state.result.length > 22 ? ' tiny' : state.result.length > 13 ? ' small' : '');
-
-    $('modeLabel').textContent = modeTag(state.mode);
-    $('angleLabel').textContent = state.angle === 'deg' ? 'D' : state.angle === 'rad' ? 'R' : 'G';
-
-    var flags = {
-      S: state.shift,
-      A: state.alpha,
-      M: state.vars.M !== 0,
-      STO: state.storeArmed,
-      i: state.complexFormat === 'polar' && (state.mode === 'complex' || state.mode === 'calc'),
-      R: state.angle === 'rad'
-    };
-    Array.prototype.forEach.call($('flags').children, function (f) {
-      f.classList.toggle('on', !!flags[f.dataset.flag]);
-    });
-
-    var hint = '';
-    if (state.isError) hint = 'CHECK INPUT';
-    else if (state.storeArmed) hint = 'STO ▸ PICK A VARIABLE';
-    else if (state.shift) hint = 'SHIFT ACTIVE';
-    else if (state.alpha) hint = 'ALPHA ACTIVE';
-    else if (state.sdStage === 1) hint = 'FRACTION VIEW';
-    else if (state.sdStage === 2) hint = 'π VIEW';
-    else if (state.mode !== 'calc') hint = (MODES[state.mode] || {}).name || '';
-    else hint = state.expr ? 'PRESS = TO EVALUATE' : 'PRESS A KEY TO START';
-    $('screenHint').textContent = hint;
-  }
-
-  function modeTag(mode) {
-    return {
-      calc: 'COMP', complex: 'CMPLX', stat: 'STAT', matrix: 'MATRIX',
-      vector: 'VECTOR', equation: 'EQN', basen: 'BASE', ratio: 'RATIO',
-      table: 'TABLE', solve: 'SOLVE', verify: 'VERIFY', constants: 'CONST'
-    }[mode] || 'COMP';
-  }
-
-  /* ------------------------------------------------------------
-     evaluation
-     ------------------------------------------------------------ */
-  function evalCtx(extraVars) {
-    var vars = Object.assign({}, state.vars, { M: state.memory }, extraVars || {});
-    return {
-      angle: state.angle,
-      ans: state.ans,
-      vars: vars,
-      complex: complexMode(),
-      tol: 1e-10
-    };
-  }
-
-  function complexMode() {
-    return state.mode === 'complex' || state.mode === 'equation';
-  }
-
-  function displayFormat() {
-    return {
-      format: state.format,
-      complex: complexMode(),
-      complexFormat: state.complexFormat,
-      angle: state.angle
-    };
-  }
-
-  function evaluateCurrent() {
-    var src = state.expr.trim();
-    if (!src) {
-      state.result = E.formatValue(state.ans, displayFormat());
-      renderScreen();
+    if (S.shift && key.s) {
+      S.shift = false;
+      if (key.sv) { CMD[key.sv] ? run(key.sv) : insert(key.sv); }
+      else toast(key.s + ' — no function');
+      paint();
       return;
     }
-    try {
-      var value = E.evaluate(src, evalCtx());
-      if (E.C.isPair(value)) {
-        state.result = E.formatValue(value, displayFormat());
-        state.rawValue = value;
-      } else {
-        var z = E.C.to(value);
-        if (Math.abs(z.im) < 1e-12 && state.format === 'norm') {
-          var fr = E.fractionOf(z.re);
-          state._fraction = fr;
-        } else {
-          state._fraction = null;
-        }
-        state.rawValue = value;
-        state.ans = Math.abs(z.im) < 1e-12 ? z.re : E.C.abs(value);
-        state.result = E.formatValue(value, displayFormat());
-        /* norm mode: show a clean fraction automatically (like S⇔D default) */
-        if (state.format === 'norm' && Math.abs(z.im) < 1e-12 && state._fraction && state.autoFraction !== false) {
-          state.result = E.fractionText(state._fraction);
-          state.sdStage = 1;
-        }
-      }
-      /* alternative form shown on the second line (textbook feel) */
-      state.altText = '';
-      if (!E.C.isPair(state.rawValue)) {
-        var alt = E.C.to(state.rawValue);
-        if (Math.abs(alt.im) < 1e-12) {
-          var pf = E.piFraction(alt.re);
-          var frTxt = state._fraction ? E.fractionText(state._fraction) : null;
-          var decTxt = E.formatValue(alt.re, { format: 'norm', complex: false });
-          if (frTxt && state.result === frTxt) state.altText = decTxt;         // fraction → show decimal
-          else if (pf && state.result === pf) state.altText = decTxt;
-          else if (pf && state.result.indexOf(pf) < 0) state.altText = pf;
-          else if (frTxt && state.result.indexOf(frTxt) < 0) state.altText = frTxt;
-        }
-      }
-      state.isError = false;
-      state.sdStage = 0;
-      $('result').classList.remove('flash');
-      void $('result').offsetWidth;
-      $('result').classList.add('flash');
-
-      state.history.unshift({ expr: src, result: state.result, mode: state.mode, ts: Date.now() });
-      if (state.history.length > 80) state.history.pop();
-      state.histIndex = -1;
-      saveState();
-      renderHistory();
-      renderScreen();
-    } catch (err) {
-      state.result = (err && err.message) || 'Math ERROR';
-      state.altText = '';
-      state.isError = true;
-      state.sdStage = 0;
-      click(180);
-      haptic(40);
-      renderScreen();
-    }
-  }
-
-  /* S⇔D cycling: decimal → fraction → π → decimal */
-  function toggleSD() {
-    if (state.isError) { evaluateCurrent(); return; }
-    if (state.rawValue == null) {
-      /* nothing evaluated yet: evaluate first if there is an expression */
-      if (state.expr.trim()) evaluateCurrent();
+    if (S.alpha && key.a) {
+      S.alpha = false;
+      insert(key.av || key.a);
+      paint();
       return;
     }
-    var v = state.rawValue;
-    if (E.C.isPair(v)) { toast('Result is a pair'); return; }
-    var z = E.C.to(v);
-    if (Math.abs(z.im) > 1e-12) {
-      state.complexFormat = state.complexFormat === 'rect' ? 'polar' : 'rect';
-      $('selComplex').value = state.complexFormat;
-      state.result = E.formatValue(v, displayFormat());
-      renderScreen(); saveState();
-      return;
-    }
-    var x = z.re;
-    var fr = E.fractionOf(x);
-    var pi = E.piFraction(x);
-    var stages = [];
-    stages.push(E.formatValue(x, { format: 'norm', complex: true }));
-    if (fr) stages.push(E.fractionText(fr));
-    if (pi && stages.indexOf(pi) < 0) stages.push(pi);
-    if (stages.length === 1) { toast('No alternative form'); return; }
-    state.sdStage = (state.sdStage + 1) % stages.length;
-    state.result = stages[state.sdStage];
-    state.altText = stages.filter(function (t, i) { return i !== state.sdStage; }).slice(0, 1).join('') || '';
-    if (state.sdStage > 0 && fr && state.result === E.fractionText(fr)) state._fraction = fr;
-    renderScreen();
+    if (S.shift || S.alpha) { S.shift = false; S.alpha = false; }
+    if (key.act === 'cmd') run(key.v);
+    else insert(key.v);
   }
 
-  /* ------------------------------------------------------------
-     commands
-     ------------------------------------------------------------ */
-  function runCommand(cmd) {
+  function run(cmd) {
     switch (cmd) {
-      case 'off': screenOff(); break;
-      case 'on': clearAll(); break;
-      case 'ac': clearAll(); break;
-      case 'del': backspace(); break;
-      case 'equals': evaluateCurrent(); break;
+      case 'ac': case 'on': clearAll(); break;
+      case 'off': clearAll(); toast('MKJ CALC'); break;
+      case 'del': del(); break;
+      case 'equals': equals(); break;
       case 'sd': toggleSD(); break;
-      case 'left': state.caret = Math.max(0, state.caret - 1); renderScreen(); break;
-      case 'right': state.caret = Math.min(state.expr.length, state.caret + 1); renderScreen(); break;
-      case 'up': histBrowse(-1); break;
-      case 'down': histBrowse(1); break;
-      case 'mode': case 'home': enterModes(); break;
-      case 'settings': case 'tools': openSettings(); break;
+      case 'ans': insert('Ans'); break;
+      case 'left': S.caret = Math.max(0, S.caret - 1); paint(); break;
+      case 'right': S.caret = Math.min(S.expr.length, S.caret + 1); paint(); break;
+      case 'up': browse(-1); break;
+      case 'down': browse(1); break;
+      case 'mode': case 'home': showModes(); break;
+      case 'settings': case 'tools': openMenu(); break;
       case 'catalog': openCatalog(); break;
       case 'variable': openVars('insert'); break;
-      case 'ans': insert('Ans'); break;
-      case 'mplus':
-        state.memory += state.ans;
-        state.vars.M = state.memory;
-        state.result = E.formatValue(state.memory, displayFormat());
-        saveState(); renderScreen();
-        toast('M = ' + state.result);
-        break;
-      case 'mminus':
-        state.memory -= state.ans;
-        state.vars.M = state.memory;
-        state.result = E.formatValue(state.memory, displayFormat());
-        saveState(); renderScreen();
-        toast('M = ' + state.result);
-        break;
       case 'sto': openVars('store'); break;
       case 'rcl': openVars('recall'); break;
+      case 'mplus':
+        S.vars.M += S.ans;
+        S.result = E.formatValue(S.vars.M, fmtOpts());
+        paint(); save(); toast('M = ' + S.result);
+        break;
+      case 'mminus':
+        S.vars.M -= S.ans;
+        S.result = E.formatValue(S.vars.M, fmtOpts());
+        paint(); save(); toast('M = ' + S.result);
+        break;
       case 'eng':
-        state.format = state.format === 'eng' ? 'norm' : 'eng';
-        $('selFormat').value = state.format;
-        if (state.rawValue != null && !E.C.isPair(state.rawValue)) {
-          state.rawValue = E.C.to(state.rawValue);
-          state.result = E.formatValue(state.rawValue, displayFormat());
-        }
-        saveState(); renderScreen();
-        toast('Format: ' + state.format.toUpperCase());
+        S.format = S.format === 'eng' ? 'norm' : 'eng';
+        $('setFormat').value = S.format;
+        if (S.raw != null) S.result = E.formatValue(S.raw, fmtOpts());
+        paint(); save(); toast('Format: ' + S.format.toUpperCase());
         break;
       case 'drg':
-        state.angle = state.angle === 'deg' ? 'rad' : state.angle === 'rad' ? 'grad' : 'deg';
-        $('selAngle').value = state.angle;
-        saveState(); renderScreen();
-        toast('Angle: ' + state.angle.toUpperCase());
+        S.angle = S.angle === 'deg' ? 'rad' : S.angle === 'rad' ? 'grad' : 'deg';
+        $('setAngle').value = S.angle;
+        paint(); save(); toast('Angle: ' + S.angle.toUpperCase());
         break;
-      case 'calc': openCalcDialog(); break;
+      case 'calc': openCalc(); break;
       case 'solve': openMode('solve'); break;
       case 'rand': insert('rand'); break;
-      default: /* unknown command */ break;
     }
   }
 
-  function screenOff() {
-    state.result = '';
-    state.expr = '';
-    state.caret = 0;
-    renderScreen();
-    $('screen').classList.add('is-off');
-    $('screenHint').textContent = '';
-    var restore = function () {
-      $('screen').classList.remove('is-off');
-      clearAll();
-      document.removeEventListener('pointerdown', restore);
+  function browse(dir) {
+    if (!S.history.length) return;
+    var i = Math.min(S.history.length - 1, Math.max(0, (S.histI == null ? -1 : S.histI) + dir));
+    S.histI = i;
+    S.expr = S.history[i].e;
+    S.caret = S.expr.length;
+    S.result = S.history[i].r;
+    S.isError = false;
+    paint();
+  }
+
+  /* ---------------- sheets content ---------------- */
+  var MODEL_INFO = {
+    esplus: { name: 'MKJ-991ES PLUS', desc: 'Classic pad · 417 functions', shape: '' },
+    explus: { name: 'MKJ-991EX PLUS', desc: 'ClassWiz pad · 552 functions', shape: '' },
+    cw: { name: 'MKJ-991CW', desc: 'Circular keys · 4-gradation LCD', shape: 'cw' }
+  };
+
+  function openModels() {
+    var list = $('modelList');
+    list.innerHTML = '';
+    LAY.order.forEach(function (id) {
+      var info = MODEL_INFO[id];
+      var b = el('button', 'mrow' + (S.model === id ? ' on' : ''));
+      var th = el('div', 'thumb ' + info.shape);
+      th.appendChild(el('div', 't-scr'));
+      var ks = el('div', 't-keys');
+      for (var i = 0; i < 16; i++) ks.appendChild(el('i'));
+      th.appendChild(ks);
+      b.appendChild(th);
+      var t = el('div');
+      t.appendChild(el('b', null, info.name));
+      t.appendChild(el('small', null, info.desc));
+      b.appendChild(t);
+      if (S.model === id) b.appendChild(el('span', 'tick', '✓'));
+      b.addEventListener('click', function () {
+        S.model = id;
+        document.body.dataset.model = id;
+        buildPad();
+        paint();
+        save();
+        closeSheet();
+        toast(info.name);
+      });
+      list.appendChild(b);
+    });
+    show('sheetModels');
+  }
+
+  function showModes() {
+    var grid = $('modeGrid');
+    grid.innerHTML = '';
+    MODES.order.forEach(function (id) {
+      var m = MODES[id];
+      if (!m) return;
+      var b = el('button', 'mcard' + (S.mode === id ? ' on' : ''));
+      var i = el('div', 'mi', m.icon);
+      i.style.background = m.color;
+      b.appendChild(i);
+      b.appendChild(el('b', null, m.name));
+      b.appendChild(el('small', null, m.desc));
+      b.addEventListener('click', function () {
+        closeSheet();
+        openMode(id);
+      });
+      grid.appendChild(b);
+    });
+    show('sheetModes');
+  }
+
+  function openMenu() {
+    $('setAngle').value = S.angle;
+    $('setFormat').value = S.format;
+    $('setComplex').value = S.complexFormat;
+    $('setTheme').value = S.theme;
+    $('setSound').value = S.sound ? 'on' : 'off';
+    $('setHaptic').value = S.haptic ? 'on' : 'off';
+    show('sheetMenu');
+  }
+
+  function openHistory() {
+    var list = $('histList');
+    list.innerHTML = '';
+    if (!S.history.length) { list.appendChild(el('p', 'empty', 'No calculations yet')); }
+    S.history.forEach(function (h) {
+      var d = el('div', 'hitem');
+      d.appendChild(el('div', 'e', h.e));
+      d.appendChild(el('div', 'r', h.r));
+      d.addEventListener('click', function () {
+        S.expr = h.e;
+        S.caret = h.e.length;
+        S.result = h.r;
+        S.isError = false;
+        closeSheet();
+        paint();
+      });
+      list.appendChild(d);
+    });
+    show('sheetHistory');
+  }
+
+  function openVars(mode) {
+    S.varMode = mode;
+    $('varsTitle').textContent = mode === 'store' ? 'Store Ans' : mode === 'recall' ? 'Recall' : 'Variables';
+    $('varsHint').textContent = mode === 'store'
+      ? 'Ans এর মান ভেরিয়েবলে রাখা হবে'
+      : mode === 'recall' ? 'ভেরিয়েবলের মান রেসাল্ট লাইনে বসবে' : 'এক্সপ্রেশনে ভেরিয়েবল বসাবে';
+    var g = $('varGrid');
+    g.innerHTML = '';
+    Object.keys(S.vars).forEach(function (k) {
+      var b = el('button', 'vbtn');
+      b.appendChild(el('b', null, k));
+      b.appendChild(el('span', null, E.formatValue(S.vars[k], { format: 'norm' })));
+      b.addEventListener('click', function () {
+        if (mode === 'store') { S.vars[k] = S.ans; save(); closeSheet(); toast('Ans → ' + k); }
+        else if (mode === 'recall') {
+          S.ans = S.vars[k];
+          S.raw = S.vars[k];
+          S.result = E.formatValue(S.vars[k], fmtOpts());
+          S.isError = false;
+          closeSheet(); paint();
+        } else { insert(k); closeSheet(); }
+      });
+      g.appendChild(b);
+    });
+    show('sheetVars');
+  }
+
+  function openCatalog() {
+    var host = $('catList');
+    host.innerHTML = '';
+    LAY.catalog.forEach(function (grp) {
+      var g = el('div', 'cat-g');
+      g.appendChild(el('h4', null, grp.group));
+      var row = el('div', 'cat-i');
+      grp.items.forEach(function (it) {
+        var b = el('button', null, it);
+        b.addEventListener('click', function () { insert(it); closeSheet(); });
+        row.appendChild(b);
+      });
+      g.appendChild(row);
+      host.appendChild(g);
+    });
+    show('sheetCatalog');
+  }
+
+  /* CALC — ask for variable values */
+  function openCalc() {
+    var found = [];
+    var re = /(?:^|[^A-Za-z])([A-FM])(?![A-Za-z])/g, m;
+    while ((m = re.exec(S.expr))) if (found.indexOf(m[1]) < 0) found.push(m[1]);
+    if (!found.length) { equals(); return; }
+    var body = $('calcBody');
+    body.innerHTML = '';
+    var inputs = {};
+    found.forEach(function (n) {
+      var row = el('label', 'cvar');
+      row.appendChild(el('span', null, n + ' ='));
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.inputMode = 'decimal';
+      inp.value = String(S.vars[n]);
+      inputs[n] = inp;
+      row.appendChild(inp);
+      body.appendChild(row);
+    });
+    $('calcGo').onclick = function () {
+      var ov = {};
+      Object.keys(inputs).forEach(function (n) {
+        try {
+          var v = E.evaluate(inputs[n].value || '0', { angle: S.angle, vars: {} });
+          ov[n] = E.C.isC(v) ? v.re : v;
+        } catch (e) { ov[n] = 0; }
+      });
+      closeSheet();
+      try {
+        showValue(E.evaluate(S.expr, ctx(ov)));
+        paint();
+      } catch (e) {
+        S.result = e.message; S.isError = true; paint();
+      }
     };
-    document.addEventListener('pointerdown', restore);
+    show('sheetCalc');
   }
 
-  function histBrowse(dir) {
-    if (!state.history.length) return;
-    if (state.histIndex === -1) state.histIndex = dir < 0 ? 0 : -1;
-    else state.histIndex = Math.min(state.history.length - 1, Math.max(0, state.histIndex + dir));
-    var item = state.history[state.histIndex];
-    if (!item) return;
-    state.expr = item.expr;
-    state.caret = state.expr.length;
-    state.result = item.result;
-    state.isError = false;
-    renderScreen();
-  }
-
-  /* ------------------------------------------------------------
-     modes
-     ------------------------------------------------------------ */
-  var activeModeApi = null;
+  /* ---------------- workspace / modes ---------------- */
+  var wsApi = null;
 
   function openMode(id) {
     var m = MODES[id];
     if (!m) return;
-    state.mode = id;
+    S.mode = id;
+
+    /* Calculate / Complex use the main LCD + keypad, no workspace */
+    if (id === 'calc' || id === 'complex') {
+      $('workspace').hidden = true;
+      paint();
+      toast(m.name);
+      return;
+    }
+
     var ws = $('workspace');
     ws.innerHTML = '';
-    activeModeApi = null;
 
-    var panelModes = ['calc', 'complex'];
-    var isPanel = panelModes.indexOf(id) >= 0;
-
-    if (!isPanel && m.render) {
-      ws.hidden = false;
-      var api = makeApi();
-      activeModeApi = api;
-      try { m.render(ws, api); } catch (err) {
-        ws.innerHTML = '<div class="mode-out is-error">' + err.message + '</div>';
-      }
-
-      /* compact keypad for mode workspaces */
-      var basic = buildCompactKeypad();
-      ws.appendChild(basic);
-
-      /* expandable full keypad */
-      var fullWrap = document.createElement('div');
-      fullWrap.hidden = true;
-      var fullPad = document.createElement('div');
-      fullPad.className = 'keypad';
-      fullWrap.appendChild(fullPad);
-      ws.appendChild(fullWrap);
-      renderKeypadInto(fullPad);
-
-      var toggle = document.createElement('button');
-      toggle.className = 'btn ghost pad-toggle';
-      toggle.textContent = '⌨ Full keypad';
-      toggle.addEventListener('click', function () {
-        fullWrap.hidden = !fullWrap.hidden;
-        toggle.textContent = fullWrap.hidden ? '⌨ Full keypad' : '⌨ Hide full keypad';
-      });
-      ws.appendChild(toggle);
-
-      $('padArea').hidden = true;
-    } else {
+    var head = el('div', 'ws-head');
+    var back = el('button', 'ico', '‹');
+    back.addEventListener('click', function () {
       ws.hidden = true;
-      $('padArea').hidden = false;
+      S.mode = 'calc';
+      paint();
+      showModes();
+    });
+    head.appendChild(back);
+    head.appendChild(el('b', null, m.name));
+    var keyBtn = el('button', 'ico', '⌨');
+    keyBtn.title = 'number pad';
+    head.appendChild(keyBtn);
+    ws.appendChild(head);
+
+    var body = el('div', 'ws-body');
+    ws.appendChild(body);
+
+    if (m.render) {
+      wsApi = makeApi(body);
+      try { m.render(body, wsApi); }
+      catch (e) { body.innerHTML = '<div class="out err">' + e.message + '</div>'; }
     }
 
-    show('calc');
-    renderKeypad();
-    renderScreen();
+    /* on-screen number pad for form-based modes */
+    var padHost = el('div', 'minipad');
+    padHost.dataset.pad = '1';
+    ws.querySelectorAll('input').forEach(function (inp, i) { if (i === 0) inp.dataset.first = '1'; });
+    var focused = null;
+    function bindInputs() {
+      var list = [].slice.call(ws.querySelectorAll('input'));
+      if (!focused || !list.length) focused = list[0] || null;
+      list.forEach(function (inp) {
+        inp.addEventListener('focus', function () { focused = inp; });
+        inp.addEventListener('input', function () { focused = inp; });
+        inp.addEventListener('click', function () { focused = inp; });
+      });
+    }
+    bindInputs();
+    ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '−'].forEach(function (k) {
+      var b = el('button', null, k);
+      b.addEventListener('click', function () {
+        if (!focused) { bindInputs(); if (!focused) return; }
+        var val = k === '−' ? '-' : k;
+        focused.value += val;
+        focused.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      padHost.appendChild(b);
+    });
+    var delBtn = el('button', 'act', 'DEL');
+    delBtn.addEventListener('click', function () {
+      if (!focused) return;
+      focused.value = focused.value.slice(0, -1);
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    var acBtn = el('button', 'act', 'AC');
+    acBtn.addEventListener('click', function () {
+      if (!focused) return;
+      focused.value = '';
+      focused.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    padHost.appendChild(delBtn);
+    padHost.appendChild(acBtn);
+    body.appendChild(padHost);
+
+    keyBtn.addEventListener('click', function () {
+      padHost.hidden = !padHost.hidden;
+    });
+
+    ws.hidden = false;
+    paint();
   }
 
-  /* API handed to mode modules */
-  function makeApi() {
+  function makeApi(body) {
     return {
-      state: state,
+      state: S,
       engine: E,
+      el: el,
       toast: toast,
-      insertInto: function (text) { insert(text); },
-      saveState: saveState,
-      calcBind: function () { /* main LCD is used */ },
-      calcKey: function (cmd) { runCommand(cmd); },
-      calcReformat: function () {
-        if (state.rawValue != null) state.result = E.formatValue(state.rawValue, displayFormat());
-        renderScreen();
+      insert: insert,
+      save: save,
+      field: function (label, input) {
+        var f = el('label', 'f');
+        f.appendChild(el('span', null, label));
+        f.appendChild(input);
+        return f;
+      },
+      input: function (opts) {
+        var i = document.createElement('input');
+        i.type = 'text';
+        i.inputMode = opts && opts.numeric ? 'decimal' : 'text';
+        if (opts && opts.value !== undefined) i.value = opts.value;
+        if (opts && opts.placeholder) i.placeholder = opts.placeholder;
+        return i;
+      },
+      select: function (opts, value) {
+        var s = document.createElement('select');
+        opts.forEach(function (o) {
+          var op = document.createElement('option');
+          op.value = o[0]; op.textContent = o[1];
+          if (o[0] === value) op.selected = true;
+          s.appendChild(op);
+        });
+        return s;
+      },
+      panel: function (title, sub) {
+        var p = el('div', 'pnl');
+        if (title) p.appendChild(el('h3', null, title));
+        if (sub) p.appendChild(el('p', 's', sub));
+        body.appendChild(p);
+        return p;
+      },
+      out: function (host) {
+        var o = el('div', 'out');
+        o.innerHTML = '<span class="muted">—</span>';
+        host.appendChild(o);
+        return o;
+      },
+      setOut: function (o, html, err) {
+        o.innerHTML = html;
+        o.classList.toggle('err', !!err);
+      },
+      btn: function (label, cls, fn) {
+        var b = el('button', 'btn ' + (cls || ''), label);
+        b.addEventListener('click', fn);
+        return b;
       }
     };
   }
 
-  /* ------------------------------------------------------------
-     panels
-     ------------------------------------------------------------ */
-  var openPanelId = null;
-
-  function openPanel(id) {
-    closePanel();
-    var p = $(id);
-    if (!p) return;
-    p.hidden = false;
-    $('overlay').hidden = false;
-    openPanelId = id;
-  }
-  function closePanel() {
-    if (openPanelId) { $(openPanelId).hidden = true; openPanelId = null; }
-    $('overlay').hidden = true;
-  }
-
-  function openSheet(title, bodyHtml, footHtml) {
-    $('sheetTitle').textContent = title;
-    $('sheetBody').innerHTML = bodyHtml;
-    var foot = $('sheetFoot');
-    foot.innerHTML = footHtml || '';
-    foot.hidden = !footHtml;
-    openPanel('sheet');
-    return $('sheetBody');
-  }
-
-  /* settings */
-  function openSettings() {
-    $('selAngle').value = state.angle;
-    $('selFormat').value = state.format;
-    $('selComplex').value = state.complexFormat;
-    $('selTheme').value = state.theme;
-    $('selSound').value = state.sound ? 'on' : 'off';
-    $('selHaptic').value = state.haptic ? 'on' : 'off';
-    $('selAutoFrac').value = state.autoFraction ? 'on' : 'off';
-    openPanel('panelSettings');
-  }
-
-  /* catalog */
-  function openCatalog() {
-    var body = $('catalogBody');
-    body.innerHTML = '';
-    LAY.catalog.forEach(function (group) {
-      var g = document.createElement('div');
-      g.className = 'cat-group';
-      var h = document.createElement('h4');
-      h.textContent = group.group;
-      g.appendChild(h);
-      var items = document.createElement('div');
-      items.className = 'cat-items';
-      group.items.forEach(function (item) {
-        var b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'cat-item';
-        b.textContent = item;
-        b.addEventListener('click', function () {
-          insert(item);
-          closePanel();
-        });
-        items.appendChild(b);
-      });
-      g.appendChild(items);
-      body.appendChild(g);
+  /* ---------------- wiring ---------------- */
+  function wire() {
+    $('btnModels').addEventListener('click', openModels);
+    $('btnModes').addEventListener('click', showModes);
+    $('btnMenu').addEventListener('click', openMenu);
+    $('scrim').addEventListener('click', closeSheet);
+    document.querySelectorAll('[data-close]').forEach(function (b) {
+      b.addEventListener('click', function (ev) { ev.stopPropagation(); closeSheet(); });
     });
-    openPanel('panelCatalog');
-  }
 
-  /* variables */
-  function openVars(mode) {
-    state.varsMode = mode;
-    $('varsTitle').textContent =
-      mode === 'store' ? 'Store answer in a variable' :
-      mode === 'recall' ? 'Recall a variable' : 'Insert a variable';
-    $('varsNote').textContent =
-      mode === 'store' ? 'Ans এর মান ভেরিয়েবলে রাখা হবে।' :
-      mode === 'recall' ? 'ভেরিয়েবলের মান রেজাল্ট লাইনে বসবে।' :
-      'এক্সপ্রেশনে ভেরিয়েবল বসাবে।';
-    renderVars();
-    openPanel('panelVars');
-  }
-
-  function renderVars() {
-    var grid = $('varsGrid');
-    grid.innerHTML = '';
-    Object.keys(state.vars).forEach(function (name) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'var-btn';
-      var t = document.createElement('b');
-      t.textContent = name;
-      var v = document.createElement('span');
-      var val = name === 'M' ? state.memory : state.vars[name];
-      v.textContent = E.formatValue(val, { format: 'norm' });
-      b.appendChild(t); b.appendChild(v);
-      b.addEventListener('click', function () {
-        if (state.varsMode === 'store') {
-          state.vars[name] = state.ans;
-          if (name === 'M') state.memory = state.ans;
-          toast('Ans → ' + name);
-          saveState();
-          closePanel();
-        } else if (state.varsMode === 'recall') {
-          state.ans = val;
-          state.rawValue = val;
-          state.result = E.formatValue(val, displayFormat());
-          state.isError = false;
-          renderScreen();
-          toast(name + ' = ' + state.result);
-          closePanel();
-        } else {
-          insert(name);
-          closePanel();
-        }
-      });
-      grid.appendChild(b);
+    $('btnHistory').addEventListener('click', openHistory);
+    $('btnVars').addEventListener('click', function () { openVars('insert'); });
+    $('btnCatalog').addEventListener('click', openCatalog);
+    $('btnHelp').addEventListener('click', function () { show('sheetHelp'); });
+    $('clearHist').addEventListener('click', function () {
+      S.history = []; save(); openHistory(); toast('History cleared');
     });
-  }
 
-  /* store via keypad */
-  function storeTo(name) {
-    state.vars[name] = state.ans;
-    if (name === 'M') state.memory = state.ans;
-    state.storeArmed = false;
-    state.result = E.formatValue(state.ans, displayFormat());
-    saveState();
-    renderScreen();
-    toast('Ans → ' + name);
-  }
-
-  /* history */
-  function renderHistory() {
-    var list = $('historyList');
-    if (!list) return;
-    if (!state.history.length) {
-      list.innerHTML = '<div class="hist-empty">No calculations yet.</div>';
-      return;
-    }
-    list.innerHTML = '';
-    state.history.forEach(function (item) {
-      var d = document.createElement('div');
-      d.className = 'hist-item';
-      d.innerHTML = '<div class="hist-expr"></div><div class="hist-res"></div>';
-      d.querySelector('.hist-expr').textContent = item.expr;
-      d.querySelector('.hist-res').textContent = item.result;
-      d.addEventListener('click', function () {
-        state.expr = item.expr;
-        state.caret = state.expr.length;
-        state.result = item.result;
-        state.isError = false;
-        if (item.mode && MODES[item.mode] && item.mode !== state.mode) openMode(item.mode);
-        closePanel();
-        renderScreen();
-      });
-      list.appendChild(d);
+    $('setAngle').addEventListener('change', function (e) { S.angle = e.target.value; save(); paint(); });
+    $('setFormat').addEventListener('change', function (e) {
+      S.format = e.target.value; save();
+      if (S.raw != null) S.result = E.formatValue(S.raw, fmtOpts());
+      paint();
     });
-  }
-
-  /* CALC — evaluate with temporary variable values */
-  function variablesInExpression(expr) {
-    var found = [];
-    var re = /(?:^|[^A-Za-z])([A-FM])(?![A-Za-z])/g;
-    var m;
-    while ((m = re.exec(expr))) {
-      if (found.indexOf(m[1]) < 0) found.push(m[1]);
-    }
-    return found;
-  }
-
-  function openCalcDialog() {
-    var names = variablesInExpression(state.expr);
-    if (!names.length) { evaluateCurrent(); return; }
-    var body = $('calcVarsBody');
-    body.innerHTML = '';
-    var inputs = {};
-    names.forEach(function (name) {
-      var wrap = document.createElement('label');
-      wrap.className = 'field';
-      wrap.innerHTML = '<span>' + name + '</span>';
-      var inp = document.createElement('input');
-      inp.type = 'text';
-      inp.inputMode = 'decimal';
-      inp.value = String(state.vars[name]);
-      inp.style.fontFamily = 'var(--font-num)';
-      inputs[name] = inp;
-      wrap.appendChild(inp);
-      body.appendChild(wrap);
+    $('setComplex').addEventListener('change', function (e) {
+      S.complexFormat = e.target.value; save();
+      if (S.raw != null) S.result = E.formatValue(S.raw, fmtOpts());
+      paint();
     });
-    var note = document.createElement('div');
-    note.className = 'panel-note';
-    note.textContent = 'এই মানগুলো শুধু এই হিসাবের জন্য ব্যবহার হবে।';
-    body.appendChild(note);
-    openPanel('panelCalc');
+    $('setTheme').addEventListener('change', function (e) {
+      S.theme = e.target.value;
+      document.body.dataset.theme = S.theme;
+      save();
+    });
+    $('setSound').addEventListener('change', function (e) {
+      S.sound = e.target.value === 'on'; save();
+      if (S.sound) beep(900);
+    });
+    $('setHaptic').addEventListener('change', function (e) { S.haptic = e.target.value === 'on'; save(); });
 
-    $('calcRun').onclick = function () {
-      var overrides = {};
-      Object.keys(inputs).forEach(function (n) {
-        try {
-          var v = E.evaluate(inputs[n].value || '0', { angle: state.angle, vars: {} });
-          overrides[n] = E.C.isC(v) ? v.re : v;
-        } catch (e) { overrides[n] = 0; }
-      });
-      closePanel();
-      substituteAndEvaluate(overrides);
-    };
+    document.addEventListener('keydown', onKey);
   }
 
-  function substituteAndEvaluate(overrides) {
-    try {
-      var val = E.evaluate(state.expr, evalCtx(overrides));
-      state.rawValue = val;
-      state.result = E.formatValue(val, displayFormat());
-      state.isError = false;
-      var z = E.C.to(val);
-      if (Math.abs(z.im) < 1e-12) { state.ans = z.re; state._fraction = E.fractionOf(z.re); }
-      state.sdStage = 0;
-      state.history.unshift({ expr: state.expr, result: state.result, mode: state.mode, ts: Date.now() });
-      saveState(); renderHistory(); renderScreen();
-    } catch (e) {
-      state.result = e.message;
-      state.isError = true;
-      renderScreen();
-    }
-  }
-
-  /* ------------------------------------------------------------
-     physical keyboard
-     ------------------------------------------------------------ */
-  function onKeyDown(ev) {
+  function onKey(ev) {
     var tag = (ev.target && ev.target.tagName) || '';
-    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
-    if (state.view !== 'calc') {
-      if (ev.key === 'Escape' && openPanelId) return;
-      return;
-    }
-    var k = ev.key;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (!$('workspace').hidden) return;
 
+    var k = ev.key;
     if (/^[0-9.]$/.test(k)) { insert(k); ev.preventDefault(); return; }
     if ('+-*/^()%'.indexOf(k) >= 0) { insert(k); ev.preventDefault(); return; }
-
     switch (k) {
-      case 'Enter': case '=':
-        if (ev.shiftKey) toggleSD(); else evaluateCurrent();
-        ev.preventDefault(); return;
-      case 'Backspace': backspace(); ev.preventDefault(); return;
-      case 'Escape': if (openPanelId) closePanel(); else clearAll(); ev.preventDefault(); return;
-      case 'Delete': clearAll(); ev.preventDefault(); return;
-      case 'ArrowLeft': state.caret = Math.max(0, state.caret - 1); renderScreen(); ev.preventDefault(); return;
-      case 'ArrowRight': state.caret = Math.min(state.expr.length, state.caret + 1); renderScreen(); ev.preventDefault(); return;
-      case 'ArrowUp': histBrowse(-1); ev.preventDefault(); return;
-      case 'ArrowDown': histBrowse(1); ev.preventDefault(); return;
-      default: break;
+      case 'Enter': case '=': equals(); ev.preventDefault(); return;
+      case 'Backspace': del(); ev.preventDefault(); return;
+      case 'Escape': if (openSheet) closeSheet(); else clearAll(); ev.preventDefault(); return;
+      case 'ArrowLeft': S.caret = Math.max(0, S.caret - 1); paint(); ev.preventDefault(); return;
+      case 'ArrowRight': S.caret = Math.min(S.expr.length, S.caret + 1); paint(); ev.preventDefault(); return;
+      case 'ArrowUp': browse(-1); ev.preventDefault(); return;
+      case 'ArrowDown': browse(1); ev.preventDefault(); return;
     }
-    if (k === 's' || k === 'S') { state.shift = !state.shift; state.alpha = false; renderKeypad(); renderScreen(); ev.preventDefault(); return; }
-    if (k === 'a' || k === 'A') { state.alpha = !state.alpha; state.shift = false; renderKeypad(); renderScreen(); ev.preventDefault(); return; }
     if (k === 'p') { insert('π'); ev.preventDefault(); return; }
     if (k === 'e') { insert('e'); ev.preventDefault(); return; }
     if (k === 'i') { insert('i'); ev.preventDefault(); return; }
-    if (k === 'x' || k === 'y') { insert(k); ev.preventDefault(); return; }
-    if (/^[A-FM]$/.test(k)) { insert(k); ev.preventDefault(); return; }
-    if (k === ',') { insert(','); ev.preventDefault(); return; }
+    if (/^[A-Fa-fMmyx]$/.test(k)) { insert(k.toUpperCase()); ev.preventDefault(); return; }
   }
 
-  /* ------------------------------------------------------------
-     wiring
-     ------------------------------------------------------------ */
-  function wire() {
-    $('backToHome').addEventListener('click', function () { buildModelCards(); show('home'); });
-    $('backToModes').addEventListener('click', enterModes);
-    $('openSettings').addEventListener('click', openSettings);
-    $('openSettings2').addEventListener('click', openSettings);
-    $('openHistory2').addEventListener('click', function () { renderHistory(); openPanel('panelHistory'); });
-    $('openVars2').addEventListener('click', function () { openVars('insert'); });
-    $('openHelp2').addEventListener('click', function () { openPanel('panelHelp'); });
-
-    $('overlay').addEventListener('click', closePanel);
-    Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
-      b.addEventListener('click', closePanel);
-    });
-
-    $('selAngle').addEventListener('change', function (e) {
-      state.angle = e.target.value; saveState(); renderScreen();
-    });
-    $('selFormat').addEventListener('change', function (e) {
-      state.format = e.target.value; saveState();
-      if (state.rawValue != null) state.result = E.formatValue(state.rawValue, displayFormat());
-      renderScreen();
-    });
-    $('selComplex').addEventListener('change', function (e) {
-      state.complexFormat = e.target.value; saveState();
-      if (state.rawValue != null) state.result = E.formatValue(state.rawValue, displayFormat());
-      renderScreen();
-    });
-    $('selTheme').addEventListener('change', function (e) {
-      state.theme = e.target.value;
-      document.body.dataset.theme = state.theme;
-      saveState();
-    });
-    $('selSound').addEventListener('change', function (e) {
-      state.sound = e.target.value === 'on';
-      saveState();
-      if (state.sound) click(820);
-    });
-    $('selAutoFrac').addEventListener('change', function (e) {
-      state.autoFraction = e.target.value === 'on';
-      saveState();
-      if (state.rawValue != null) {
-        var z = E.C.to(state.rawValue);
-        state._fraction = Math.abs(z.im) < 1e-12 ? E.fractionOf(z.re) : null;
-        state.result = E.formatValue(state.rawValue, displayFormat());
-        if (state.autoFraction && state._fraction) { state.result = E.fractionText(state._fraction); state.sdStage = 1; }
-      }
-      renderScreen();
-    });
-    $('selHaptic').addEventListener('change', function (e) {
-      state.haptic = e.target.value === 'on';
-      saveState();
-    });
-    $('clearHistory').addEventListener('click', function () {
-      state.history = [];
-      saveState();
-      renderHistory();
-      toast('History cleared');
-    });
-
-    document.addEventListener('keydown', onKeyDown);
-  }
-
-  /* ------------------------------------------------------------
-     boot
-     ------------------------------------------------------------ */
+  /* ---------------- boot ---------------- */
   function boot() {
-    loadState();
-    document.body.dataset.model = state.model;
-    document.body.dataset.theme = state.theme;
-    buildModelCards();
-    buildModeGrid();
+    load();
+    document.body.dataset.model = S.model;
+    document.body.dataset.theme = S.theme;
+    buildPad();
     wire();
-    renderKeypad();
-    renderScreen();
-    renderHistory();
-    show('home');
+    paint();
   }
 
-  window.MKJApp = {
-    state: state,
-    keys: function () {
-      var layout = LAY[state.model];
-      return layout.top.concat.apply(layout.top, layout.rows);
-    },
-    press: function (label) {
-      var all = window.MKJApp.keys();
-      var key = all.filter(function (k) { return k.l === label; })[0];
-      if (key) pressKey(key);
-      return key;
-    },
-    openMode: openMode,
-    evaluate: evaluateCurrent
-  };
+  window.MKJApp = { state: S, press: press, openMode: openMode, equals: equals };
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();

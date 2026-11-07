@@ -216,32 +216,32 @@
     ],
     rows: [
       [
-        CMD('SETTINGS', 'settings', { c: 'cw-fn', sm: 'xs', shape: 'circle' }),
-        CMD('FORMAT', 'sd', { c: 'cw-fn', sm: 'xs', shape: 'circle' }),
-        CMD('CATALOG', 'catalog', { c: 'cw-fn', sm: 'xs', shape: 'circle' }),
-        CMD('TOOLS', 'tools', { c: 'cw-fn', sm: 'xs', shape: 'circle' }),
-        CMD('VARIABLE', 'variable', { c: 'cw-fn', sm: 'xs', shape: 'circle' })
+        CMD('SETTINGS', 'settings', { c: 'cw', sm: 'xs', shape: 'circle' }),
+        CMD('FORMAT', 'sd', { c: 'cw', sm: 'xs', shape: 'circle' }),
+        CMD('CATALOG', 'catalog', { c: 'cw', sm: 'xs', shape: 'circle' }),
+        CMD('TOOLS', 'tools', { c: 'cw', sm: 'xs', shape: 'circle' }),
+        CMD('VARIABLE', 'variable', { c: 'cw', sm: 'xs', shape: 'circle' })
       ],
       [
-        K('x²', '²', { c: 'cw-fn', shape: 'circle', s: 'x³', sv: '³' }),
-        K('x^', '^', { c: 'cw-fn', shape: 'circle', s: 'ˣ√', sv: '^(1/' }),
-        K('√', '√(', { c: 'cw-fn', shape: 'circle', s: '∛', sv: '∛(' }),
-        K('log', 'log(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: '10ˣ', sv: '×10^(' }),
-        K('ln', 'ln(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'eˣ', sv: 'exp(' })
+        K('x²', '²', { c: 'cw', shape: 'circle', s: 'x³', sv: '³' }),
+        K('x^', '^', { c: 'cw', shape: 'circle', s: 'ˣ√', sv: '^(1/' }),
+        K('√', '√(', { c: 'cw', shape: 'circle', s: '∛', sv: '∛(' }),
+        K('log', 'log(', { c: 'cw', shape: 'circle', sm: 'sm', s: '10ˣ', sv: '×10^(' }),
+        K('ln', 'ln(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'eˣ', sv: 'exp(' })
       ],
       [
-        K('sin', 'sin(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'sin⁻¹', sv: 'sin⁻¹(', a: 'D', av: 'D' }),
-        K('cos', 'cos(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'cos⁻¹', sv: 'cos⁻¹(', a: 'E', av: 'E' }),
-        K('tan', 'tan(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'tan⁻¹', sv: 'tan⁻¹(', a: 'F', av: 'F' }),
-        K('(-)', '-', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: '∠', sv: '∠', a: 'A', av: 'A' }),
-        K('x⁻¹', '^(-1)', { c: 'cw-fn', shape: 'circle', sm: 'xs', s: 'x!', sv: '!', a: 'C', av: 'C' })
+        K('sin', 'sin(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'sin⁻¹', sv: 'sin⁻¹(', a: 'D', av: 'D' }),
+        K('cos', 'cos(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'cos⁻¹', sv: 'cos⁻¹(', a: 'E', av: 'E' }),
+        K('tan', 'tan(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'tan⁻¹', sv: 'tan⁻¹(', a: 'F', av: 'F' }),
+        K('(-)', '-', { c: 'cw', shape: 'circle', sm: 'sm', s: '∠', sv: '∠', a: 'A', av: 'A' }),
+        K('x⁻¹', '^(-1)', { c: 'cw', shape: 'circle', sm: 'xs', s: 'x!', sv: '!', a: 'C', av: 'C' })
       ],
       [
-        K('Abs', 'Abs(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'Conjg', sv: 'Conjg(' }),
-        K('nCr', 'nCr(', { c: 'cw-fn', shape: 'circle', sm: 'xs', s: 'nPr', sv: 'nPr(' }),
-        K('∫', '∫(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
-        K('Σ', '∑(', { c: 'cw-fn', shape: 'circle', sm: 'sm', s: 'Π', sv: 'Π(' }),
-        K('°′″', '°', { c: 'cw-fn', shape: 'circle', sm: 'xs', s: 'ENG', sv: 'eng' })
+        K('Abs', 'Abs(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'Conjg', sv: 'Conjg(' }),
+        K('nCr', 'nCr(', { c: 'cw', shape: 'circle', sm: 'xs', s: 'nPr', sv: 'nPr(' }),
+        K('∫', '∫(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'd/dx', sv: 'd/dx(' }),
+        K('Σ', '∑(', { c: 'cw', shape: 'circle', sm: 'sm', s: 'Π', sv: 'Π(' }),
+        K('°′″', '°', { c: 'cw', shape: 'circle', sm: 'xs', s: 'ENG', sv: 'eng' })
       ],
       memoryRow()
     ].concat(numberBlock(), [utilityRow()]),

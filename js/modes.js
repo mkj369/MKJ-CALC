@@ -1277,9 +1277,6 @@
       row.appendChild(field('step', step));
       p.appendChild(row);
       attachPad(p, [start, end, step], app);
-      var rPadHost = el('div');
-      p.appendChild(rPadHost);
-      attachPad(rPadHost, function () { return ['a','b','c','d'].map(function (k) { return inputs[k]; }); }, app);
       p.appendChild(out);
       root.appendChild(p);
       run();
