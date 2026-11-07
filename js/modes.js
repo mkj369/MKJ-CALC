@@ -1416,7 +1416,8 @@
         ['σ', 'Stefan–Boltzmann', '5.670374419e-8'],
         ['ε0', 'electric constant', '8.8541878128e-12'],
         ['μ0', 'magnetic constant', '1.25663706212e-6'],
-        ['atm', 'standard atmosphere', '101 325 Pa']
+        ['atm', 'standard atmosphere', '101 325 Pa'],
+        ['α', 'fine-structure constant', '7.2973525693e-3']
       ];
       var grid = el('div', 'const-grid');
       p.appendChild(grid);

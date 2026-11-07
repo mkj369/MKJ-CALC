@@ -181,8 +181,10 @@ All of it persists in `localStorage` under `mkjcalc.v4`.
 ## Tests
 
 ```bash
+node tests/run.js              # everything
 node tests/engine.test.js      # 170 assertions, no dependencies
-node tests/ui.test.js          # 44 assertions, needs puppeteer-core + Chromium
+node tests/ui.test.js          # 54 assertions, needs puppeteer-core + Chromium
+node tests/modes.test.js       # 41 assertions driving every app's own controls
 ```
 
 `tests/engine.test.js` covers arithmetic and precedence, angle units, logarithms,
@@ -192,9 +194,19 @@ conversion, vectors, randomness bounds, formatting and error cases.
 `tests/ui.test.js` boots the real page in headless Chromium and checks that every
 key on the pad has a unique action and that pressing all of them throws nothing,
 that arithmetic works through the physical keys, that the LCD menus navigate and
-change state, that history/variables/memory work, that all 16 apps render with
-live controls, that there is no overflow from 360 px to 1280 px, and that no
-third-party brand name appears in the DOM.
+change state, that history/variables/memory work, that settings round-trip through
+a reload, that MathI/O draws stacked fractions while LineI/O stays linear, that all
+16 apps render with live controls, that there is no overflow from 360 px to
+1280 px, and that no third-party brand name appears in the DOM.
+
+`tests/modes.test.js` drives the apps themselves and asserts on their output:
+matrix determinant, quadratic and complex equation roots, Base-N rows, statistics
+mean and SD, ratio solving, the table of values, spreadsheet formulas, numeric
+solve, VERIFY true/false, normal density and CDF, dice, constant search, vector
+dot product and magnitude, and an inequality interval.
+
+The two browser suites need `puppeteer-core` and a Chromium binary; set
+`CHROME_PATH` if Chromium is not one of the usual locations, otherwise they skip.
 
 ## Unsupported / differences from the fx-991CW
 
@@ -204,10 +216,11 @@ than faked:
 
 - **Exact symbolic algebra.** Results are numeric. Simplifying `x²/x` to `x`,
   expanding brackets or solving for a symbol in terms of others is not done.
-- **Natural (stacked) fraction display.** Input is linear natural-style text with
-  a caret; results show fractions on one line (`1/8`), not stacked.
-- **MathI/O vs LineI/O** changes the stored preference only; input is always the
-  linear editor.
+- **Natural (stacked) fraction display** covers simple `a/b` in the entry line;
+  nested fractions, mixed numbers and stacked radical/exponent layouts are still
+  drawn linearly.
+- **MathI/O vs LineI/O** switches the stacked-fraction display of the entry line;
+  the underlying editor is always the same caret editor.
 - **QR code / ClassPad sync** — not applicable to a web page.
 - **Distribution values** are computed numerically (erf-based), so extreme tails
   can differ from the device in the last digit.
