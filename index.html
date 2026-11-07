@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0e1013" />
+<title>MKJ CALC</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ===== HEADER / BRAND ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">MKJ</div>
+      <div class="brand-text">
+        <h1>MKJ <span>CALC</span></h1>
+        <p class="tagline">Scientific Calculator Series</p>
+      </div>
+    </div>
+
+    <div class="model-switch" id="modelSwitch" role="tablist" aria-label="Model">
+      <button class="model-btn" data-model="esplus" role="tab">991 ES Plus</button>
+      <button class="model-btn" data-model="explus" role="tab">991 EX Plus</button>
+      <button class="model-btn" data-model="cw"     role="tab">991 CW</button>
+    </div>
+  </header>
+
+  <!-- ===== SECONDARY ACTIONS (SHIFT / ALPHA / SETUP) ===== -->
+  <div class="quickbar">
+    <button class="chip" id="btnHelp">ⓘ Help</button>
+    <button class="chip" id="btnDegRad">DEG</button>
+    <button class="chip" id="btnHistory">🕘 History</button>
+    <button class="chip" id="btnSetup">⚙ Setup</button>
+  </div>
+
+  <!-- ===== CALCULATOR BODY ===== -->
+  <main class="calc-shell" id="calcShell">
+
+    <!-- physical top plate -->
+    <div class="plate">
+      <div class="plate-brand">
+        <span class="plate-model" id="plateModel">MKJ-991ES PLUS</span>
+        <span class="plate-sub" id="plateSub">NATURAL DISPLAY</span>
+      </div>
+      <div class="plate-badge" aria-hidden="true">
+        <span>MKJ</span>
+        <small>CALC</small>
+      </div>
+    </div>
+
+    <!-- screen -->
+    <section class="screen-wrap">
+      <div class="screen" id="screen">
+        <div class="screen-status">
+          <div class="flags" id="flags">
+            <span class="flag" data-flag="S">S</span>
+            <span class="flag" data-flag="A">A</span>
+            <span class="flag" data-flag="M">M</span>
+            <span class="flag" data-flag="STO">STO</span>
+            <span class="flag" data-flag="R">R</span>
+          </div>
+          <div class="status-right">
+            <span class="mode-label" id="modeLabel">COMP</span>
+            <span class="angle-label" id="angleLabel">D</span>
+          </div>
+        </div>
+
+        <div class="expr-box">
+          <div class="expr" id="expr" aria-live="polite"></div>
+        </div>
+
+        <div class="result" id="result">0</div>
+        <div class="screen-hint" id="screenHint">Press a key to start</div>
+      </div>
+      <div class="screen-gloss" aria-hidden="true"></div>
+    </section>
+
+    <!-- keys -->
+    <section class="pad-area">
+      <div class="pad-scroll">
+        <div class="keypad" id="keypad"></div>
+      </div>
+    </section>
+
+    <div class="plate-foot">
+      <span id="footModel">MKJ CALC · 991 ES Plus</span>
+      <span class="foot-note">2-Way Power</span>
+    </div>
+  </main>
+
+  <footer class="credit">MKJ CALC — for education &amp; practice</footer>
+</div>
+
+<!-- ===== PANELS ===== -->
+<div class="overlay" id="overlay" hidden></div>
+
+<aside class="panel" id="panelHistory" hidden>
+  <div class="panel-head">
+    <h2>History</h2>
+    <button class="icon-btn" data-close>✕</button>
+  </div>
+  <div class="panel-body" id="historyList"></div>
+  <div class="panel-foot">
+    <button class="btn ghost" id="clearHistory">Clear all</button>
+  </div>
+</aside>
+
+<aside class="panel" id="panelSetup" hidden>
+  <div class="panel-head">
+    <h2>Setup</h2>
+    <button class="icon-btn" data-close>✕</button>
+  </div>
+  <div class="panel-body">
+    <label class="field">
+      <span>Angle unit</span>
+      <select id="selAngle">
+        <option value="deg">Degree (D)</option>
+        <option value="rad">Radian (R)</option>
+        <option value="grad">Gradian (G)</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Number format</span>
+      <select id="selFormat">
+        <option value="norm">Norm (auto)</option>
+        <option value="fix2">Fix 2</option>
+        <option value="fix4">Fix 4</option>
+        <option value="sci">Sci (×10ⁿ)</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Theme</span>
+      <select id="selTheme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Key click sound</span>
+      <select id="selSound">
+        <option value="on">On</option>
+        <option value="off">Off</option>
+      </select>
+    </label>
+    <div class="panel-note">
+      Tip: press <b>SHIFT</b> then a key to use the small yellow label above it.
+    </div>
+  </div>
+</aside>
+
+<aside class="panel" id="panelVars" hidden>
+  <div class="panel-head">
+    <h2 id="varsTitle">Variables</h2>
+    <button class="icon-btn" data-close>✕</button>
+  </div>
+  <div class="panel-body">
+    <div class="vars-grid" id="varsGrid"></div>
+    <div class="panel-note" id="varsNote">Tap a variable to recall its value.</div>
+  </div>
+</aside>
+
+<aside class="panel" id="panelHelp" hidden>
+  <div class="panel-head">
+    <h2>Quick help</h2>
+    <button class="icon-btn" data-close>✕</button>
+  </div>
+  <div class="panel-body help-body">
+    <h3>Models</h3>
+    <ul>
+      <li><b>991 ES Plus</b> — classic layout, natural display, S⇔D conversion.</li>
+      <li><b>991 EX Plus</b> — 4-line class display, MATRIX / VECTOR / CONST menu keys.</li>
+      <li><b>991 CW</b> — newer flat-pad design with a round HOME button.</li>
+    </ul>
+    <h3>Display</h3>
+    <ul>
+      <li>Type an expression and press <b>=</b>.</li>
+      <li><b>S⇔D</b> swaps between fraction and decimal.</li>
+      <li><b>Ans</b> shows the last result on screen; <b>STO</b> then a variable stores it.</li>
+      <li><b>x10ˣ</b> enters an exponent of ten, <b>×10ˣ</b> for engineering-style entry.</li>
+    </ul>
+    <h3>Keyboard</h3>
+    <ul>
+      <li>0–9 <b>. + − * /</b> — literal keys</li>
+      <li><b>Enter</b> = equals, <b>Backspace</b> = DEL, <b>Esc</b> = AC</li>
+      <li><b>Shift+Enter</b> = S⇔D</li>
+    </ul>
+  </div>
+</aside>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="js/engine.js"></script>
+<script src="js/layouts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
