@@ -56,7 +56,7 @@ SHIFT (`s` / `sv`) and ALPHA (`a` / `av`) bindings.
 - **Math Box** — dice roll (2–20 sides), coin toss probability, random integers
 - **Solve** — numeric root of f(x) = 0 (Newton + bisection fallback), accepts `lhs=rhs`
 - **Verify** — compares two expressions and reports TRUE/FALSE
-- **Constants** — 18 physical constants, tap to insert
+- **Constants** — 19 physical constants with a live search box, tap to insert the value
 
 ## Engine (`js/engine.js`)
 
@@ -65,10 +65,14 @@ SHIFT (`s` / `sv`) and ALPHA (`a` / `av`) bindings.
 - Calculus: `∫(f,a,b)`, `d/dx(f,a)`, `∑(f,from,to)`, `Π(f,from,to)`
 - `Pol(x,y)` / `Rec(r,θ)` returning `r=… θ=…` pairs
 - Functions: trig + inverse + hyperbolic, log/ln/log₂, roots, factorial, nCr/nPr,
-  gcd/lcm, floor/ceil/round/frac/sign, min/max, rand/randInt
+  `mod`, variadic `GCD`/`LCM`, `PrimeFac` (prime factorisation with `a^b×c` display),
+  `isPrime`, `RanInt`/`RanList`, `Vector`/`Dot`/`Cross`/`Mag`/`UnitV`/`Angle`,
+  floor/ceil/round/frac/sign, min/max, rand
 - Matrices (det, inverse, Gauss-Jordan), statistics + distributions (normal, t),
   base conversion, fraction and π-form recognisers
-- Formatting: Norm / Fix 2–4 / Sci / Eng / Fraction / π-form, rectangular or polar complex
+- Formatting: Norm / Fix 2–4 / Sci / Eng / Fraction / π-form, rectangular or polar complex;
+  display digits and significant digits are configurable
+- Postfix `²`, `³`, `⁻¹`, `!`, `%`, `°`, `ʳ`, `ᵍ`; list results render as `[a  b  c]`
 
 ## Features
 
@@ -78,8 +82,10 @@ SHIFT (`s` / `sv`) and ALPHA (`a` / `av`) bindings.
 - History sheet, variables sheet (A–F, M), catalog of every function
 - DEG / RAD / GRAD, key click sound, haptics, dark / light theme
 - Everything persisted in `localStorage`; works offline as static files
-- Physical keyboard: digits, operators, `Enter` = equals, `Backspace` = DEL,
-  `Esc` = AC, `Shift+Enter` = S⇔D, arrows for caret/history
+- Physical keyboard: digits and operators, `Enter` = EXE, `Backspace` = DEL,
+  `Delete` = AC, `Esc` = back out / AC, arrows for caret, history and menus,
+  `F1` SHIFT · `F2` VARIABLE · `F3` CATALOG · `F4` SETTINGS · `F5` MENU · `F9` FORMAT,
+  `Ctrl+H` home, `Ctrl+R` AC
 
 ## Structure
 
@@ -101,3 +107,118 @@ python3 -m http.server 8080
 ```
 
 No build step, no dependencies.
+
+
+---
+
+# Feature Reference
+
+Everything below is implemented and exercised by the test suites. Anything that is
+*not* implemented is listed in **Unsupported / differences from the fx-991CW** — no
+button in this app pretends to work.
+
+## Display
+
+| Element | Behaviour |
+|---|---|
+| Flags line | `S` `A` `M` `STO` `RCL` indicators reflect SHIFT, ALPHA, memory and store state |
+| Right cluster | current app (`COMP`, `CMPLX`, `STAT`, …) and angle unit (`D`/`R`/`G`) |
+| Expression line | caret-tracked entry, `◀ ▶` move, `DEL` backspace, pretty `×` `÷` `−` `√` glyphs |
+| Result line | formatted per the Number Format setting |
+| Second line | alternative forms (fraction, π-form, factorisation, element count) |
+| LCD menus | SETTINGS / FORMAT / TOOLS render inside the display and take the keypad |
+
+## SETTINGS menu (SETTINGS key or `F4`)
+
+| Item | Options |
+|---|---|
+| Angle Unit | Degree / Radian / Gradian |
+| Input/Output | MathI/O / LineI/O |
+| Number Format | Norm 1 · Fix 2–4 · Sci · Eng · Fraction · π-form |
+| Complex Result | a+bi / r∠θ |
+| Frequency | On / Off |
+| Display Contrast | 1–5 (applies live) |
+| Language | English / বাংলা (UI strings only, maths notation never changes) |
+| Key Sound | On / Off |
+| Vibration | On / Off |
+| Reset | Reset all settings, variables and history, or Cancel |
+
+All of it persists in `localStorage` under `mkjcalc.v4`.
+
+## FORMAT key / TOOLS key
+
+- **FORMAT** (`F9`): S⇔D toggle, number format, fraction result on/off, display digits, sci digits.
+- **TOOLS**: calculation history (open / clear), variable manager, function catalog, about.
+
+## Variables and memory
+
+- Ten variables: `A B C D E F M x y z`.
+- **STO**: stores the current Ans into a variable (`SHIFT`+`STO`-equivalent row key, VARIABLE key, or the sheet tabs).
+- **RCL**: places a variable value in the result line.
+- **Variable key (`F2`) / sheet "Insert" tab**: inserts the symbol into the expression.
+- `M+` / `M−` accumulate Ans into `M` and show the new total.
+
+## History
+
+- Last 60 calculations, newest first, persisted.
+- `↑` / `↓` (and the scroll rocker) recall previous entries into the expression line.
+- Browsable and clearable from the history sheet and the TOOLS menu.
+
+## Keyboard map
+
+| Key | Action |
+|---|---|
+| `0-9` `.` `+ - * / ^ ( ) %` | insert |
+| `Enter` / `=` | EXE |
+| `Backspace` | DEL |
+| `Delete` | AC |
+| `Esc` | close menu → back out → AC |
+| `←` `→` `↑` `↓` | caret, history, menu navigation |
+| `F1` `F2` `F3` `F4` `F5` `F9` | SHIFT · VARIABLE · CATALOG · SETTINGS · MENU · FORMAT |
+| `Ctrl+H` / `Ctrl+R` | home screen / AC |
+| `p` `e` `i` `A-F` `x` `y` `z` `!` | constants, variables, factorial |
+
+## Tests
+
+```bash
+node tests/engine.test.js      # 170 assertions, no dependencies
+node tests/ui.test.js          # 44 assertions, needs puppeteer-core + Chromium
+```
+
+`tests/engine.test.js` covers arithmetic and precedence, angle units, logarithms,
+complex arithmetic, calculus, series, the solver, matrices, statistics, base
+conversion, vectors, randomness bounds, formatting and error cases.
+
+`tests/ui.test.js` boots the real page in headless Chromium and checks that every
+key on the pad has a unique action and that pressing all of them throws nothing,
+that arithmetic works through the physical keys, that the LCD menus navigate and
+change state, that history/variables/memory work, that all 16 apps render with
+live controls, that there is no overflow from 360 px to 1280 px, and that no
+third-party brand name appears in the DOM.
+
+## Unsupported / differences from the fx-991CW
+
+This is a faithful web calculator, not an emulator of Casio firmware. The
+following are intentionally different, and every one of them is *absent* rather
+than faked:
+
+- **Exact symbolic algebra.** Results are numeric. Simplifying `x²/x` to `x`,
+  expanding brackets or solving for a symbol in terms of others is not done.
+- **Natural (stacked) fraction display.** Input is linear natural-style text with
+  a caret; results show fractions on one line (`1/8`), not stacked.
+- **MathI/O vs LineI/O** changes the stored preference only; input is always the
+  linear editor.
+- **QR code / ClassPad sync** — not applicable to a web page.
+- **Distribution values** are computed numerically (erf-based), so extreme tails
+  can differ from the device in the last digit.
+- **Matrix elements** are real numbers only; complex matrices are not supported.
+- **Base-N** supports 32-bit integers (the real device uses 32-bit too, but
+  negative-value bit display differs).
+- **Equation app** covers polynomials (2–4) and linear simultaneous systems; it
+  does not solve general transcendental equations symbolically (Solve does that numerically).
+- **Spreadsheet** covers a 5 × 8 grid with arithmetic references and
+  SUM/AVERAGE/MAX/MIN/COUNT; it is not a full spreadsheet.
+- **Language** switches the UI strings of the sheets (English/বাংলা); the device
+  labels on the plastic are physical print and stay English, as printed hardware would.
+- **Models.** The 991 CW pad is the reference for the physical device; the ES Plus
+  and EX Plus skins reuse the app's engine under their own key maps.

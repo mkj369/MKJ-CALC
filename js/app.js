@@ -52,6 +52,8 @@
         model: S.model, angle: S.angle, format: S.format,
         complexFormat: S.complexFormat, theme: S.theme,
         sound: S.sound, haptic: S.haptic,
+        ioMode: S.ioMode, freq: S.freq, contrast: S.contrast, lang: S.lang,
+        fracMode: S.fracMode, digits: S.digits, sciDigits: S.sciDigits,
         vars: S.vars, history: S.history.slice(0, 60)
       }));
     } catch (e) {}
@@ -59,11 +61,16 @@
   function load() {
     try {
       var d = JSON.parse(localStorage.getItem(KEY) || '{}');
-      ['model', 'angle', 'format', 'complexFormat', 'theme'].forEach(function (k) {
+      ['model', 'angle', 'format', 'complexFormat', 'theme', 'ioMode', 'lang'].forEach(function (k) {
         if (d[k]) S[k] = d[k];
       });
       if (typeof d.sound === 'boolean') S.sound = d.sound;
       if (typeof d.haptic === 'boolean') S.haptic = d.haptic;
+      if (typeof d.freq === 'boolean') S.freq = d.freq;
+      if (typeof d.fracMode === 'boolean') S.fracMode = d.fracMode;
+      if (typeof d.contrast === 'number') S.contrast = d.contrast;
+      if (typeof d.digits === 'number') S.digits = d.digits;
+      if (typeof d.sciDigits === 'number') S.sciDigits = d.sciDigits;
       if (d.vars) Object.keys(S.vars).forEach(function (k) {
         if (typeof d.vars[k] === 'number') S.vars[k] = d.vars[k];
       });
@@ -137,15 +144,33 @@
       .replace(/\^\^/g, '^');
   }
 
+  /* Linear input, natural display: a simple `a/b` with no nesting is shown as a
+     stacked fraction so the entry reads like the real calculator's Natural I/O.
+     Anything more complex falls back to the linear form. */
+  function naturalise(txt) {
+    /* only whole-token digit runs: 1/8 -> stacked, (1+2)/(3+4) -> linear */
+    return txt.replace(/(^|[^0-9\])])([0-9]+)[\/÷]([0-9]+)(?![0-9])/g,
+      '$1<span class="fx"><i>$2</i><b>$3</b></span>');
+  }
+
+  var NATURAL = true;   /* Input/Output = MathI/O shows simple fractions stacked */
+
   function paintExpr() {
     var b = pretty(S.expr.slice(0, S.caret));
     var a = pretty(S.expr.slice(S.caret));
-    $('exprBefore').textContent = b;
+    var stacked = NATURAL && (S.ioMode || 'math') === 'math';
+    if (stacked) {
+      /* the caret splits the text, so the fraction across the caret stays linear */
+      $('exprBefore').innerHTML = naturalise(b);
+      $('exprAfter').innerHTML = naturalise(a.slice(1));
+    } else {
+      $('exprBefore').textContent = b;
+      $('exprAfter').textContent = a.slice(1);
+    }
     var c = $('caretChar');
     var ch = a.charAt(0);
     c.textContent = ch || ' ';
     c.className = 'cur' + (S.shift ? '' : '');
-    $('exprAfter').textContent = a.slice(1);
     $('lcd').scrollLeft = 0;
   }
 
@@ -553,12 +578,12 @@
     }
     if (!z) S.ans = 0;
 
-    S.result = E.formatValue(v, fmtOpts());
+    S.result = S.fracMode === false ? decimalOnly(v) : E.formatValue(v, fmtOpts());
     S.sdStage = 0;
 
     /* second line: alternative form */
     S.resultSub = '';
-    if (z && Math.abs(z.im) < 1e-12) {
+    if (z && Math.abs(z.im) < 1e-12 && S.fracMode !== false && S.format !== 'frac' && S.format !== 'pi') {
       var fr = S.frac ? E.fractionText(S.frac) : null;
       var pi = E.piFraction(z.re);
       var dec = E.formatValue(z.re, { format: 'norm', complex: false });
@@ -569,6 +594,13 @@
     }
     if (v && v.text) S.resultSub = v.text;
     S.isError = false;
+  }
+
+  /* Fraction Result = Off: always show the decimal, never an automatic fraction */
+  function decimalOnly(v) {
+    if (v && v.list) return E.formatValue(v, { format: 'norm' });
+    return E.formatValue(v, { format: 'norm', complex: S.mode === 'complex' || S.mode === 'equation',
+      complexFormat: S.complexFormat, angle: S.angle, digits: S.digits, sciDigits: S.sciDigits });
   }
 
   function equals() {
@@ -979,6 +1011,8 @@
     toast(L('reset'));
   }
 
+  function modeIds() { return MODES.order.slice(); }
+
   function showModes() {
     var grid = $('modeGrid');
     grid.innerHTML = '';
@@ -1252,6 +1286,7 @@
     return {
       state: S,
       dock: dock || null,
+      settings: function () { return { freq: !!S.freq, frac: S.fracMode !== false, ioMode: S.ioMode || 'math' }; },
       pushHistory: function (expr, res) {
         S.history.unshift({ e: expr, r: res });
         if (S.history.length > 60) S.history.pop();
@@ -1430,6 +1465,8 @@
     document.body.dataset.model = S.model;
     document.body.dataset.theme = S.theme;
     try {
+      applyContrast();
+      applyLang();
       buildPad();
       renderHome();
       wire();
@@ -1448,7 +1485,10 @@
     }
   }
 
-  window.MKJApp = { state: S, press: press, openMode: openMode, equals: equals };
+  window.MKJApp = {
+    state: S, press: press, openMode: openMode, equals: equals,
+    save: save, load: load, paint: paint, modeIds: modeIds
+  };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

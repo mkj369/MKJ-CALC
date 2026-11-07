@@ -152,6 +152,17 @@ body {
   color: #d5dade; opacity: .92;
 }
 
+/* natural (stacked) fraction inside the entry line */
+.lcd-expr .fx {
+  display: inline-flex; flex-direction: column; align-items: center;
+  vertical-align: middle; margin: 0 1px; font-size: .82em; line-height: 1.02;
+  transform: translateY(1px);
+}
+.lcd-expr .fx i, .lcd-expr .fx b {
+  font-style: normal; font-weight: 700; display: block; padding: 0 2px;
+}
+.lcd-expr .fx i { border-bottom: 1.2px solid currentColor; }
+
 /* ---------------- LCD system menus (SETTINGS / FORMAT / TOOLS) ---------------- */
 .lcd-menu[hidden] { display: none !important; }
 .lcd-menu {

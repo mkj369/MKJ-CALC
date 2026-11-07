@@ -318,7 +318,11 @@
         ['1', '1-Variable'],
         ['2', '2-Variable (x, y)']
       ], app.state.statType || '1');
+      var freqOn = app.settings && app.settings().freq;
       var xs = input({ placeholder: 'x:  1, 2, 3, 4', value: app.state.statX || '' });
+      var fs = input({ placeholder: 'freq: 1, 2, 1, 3', value: app.state.statF || '' });
+      var fWrap = field('frequency', fs);
+      fWrap.style.display = freqOn ? '' : 'none';
       var ys = input({ placeholder: 'y:  2, 4, 6, 8', value: app.state.statY || '' });
       var yWrap = field('y values', ys);
       var regWrap = el('div', 'fld-group');
@@ -335,6 +339,20 @@
         try { yv = rowsValue(ys.value).map(parseNum); } catch (e) { app.toast('Check y values'); }
         if (!xv.length) { stats.innerHTML = '<div class="out-empty">Enter values to see statistics</div>'; return; }
 
+        /* Frequency ON weights each x by its frequency column */
+        var fv = [];
+        if (freqOn && fs.value.trim()) {
+          try { fv = rowsValue(fs.value).map(parseNum); } catch (e) { app.toast('Check frequency values'); }
+          if (fv.length !== xv.length) { fv = []; app.toast('Frequency count must match x count'); }
+          if (fv.length) {
+            var expanded = [];
+            xv.forEach(function (x, i) {
+              var k = Math.round(fv[i]) || 0;
+              for (var j = 0; j < k; j++) expanded.push(x);
+            });
+            xv = expanded;
+          }
+        }
         var s = E.Stat.summary(xv);
         var html = grid([
           ['n', s.n], ['Σx', s.sum], ['Σx²', s.sumSq], ['x̄', s.mean],
@@ -360,7 +378,7 @@
           } catch (e) { /* not enough data */ }
         }
         stats.innerHTML = html;
-        app.state.statX = xs.value; app.state.statY = ys.value;
+        app.state.statX = xs.value; app.state.statY = ys.value; app.state.statF = fs.value;
         app.state.statType = type.value; app.state.statReg = reg.value;
       }
       function fmt(v) { return E.formatValue(v, { format: 'norm' }); }
@@ -374,9 +392,11 @@
       reg.addEventListener('change', update);
       xs.addEventListener('input', update);
       ys.addEventListener('input', update);
+      fs.addEventListener('input', update);
 
       p.appendChild(field('Data type', type));
       p.appendChild(field('x values', xs));
+      p.appendChild(fWrap);
       p.appendChild(yWrap);
       regWrap.appendChild(field('Regression', reg));
       p.appendChild(regWrap);

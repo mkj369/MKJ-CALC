@@ -17,7 +17,7 @@ var path = require('path');
 var os = require('os');
 
 var ROOT = path.join(__dirname, '..');
-var PORT = 8791;
+var PORT = Number(process.env.TEST_PORT || (8700 + (process.pid % 200)));
 
 var PASS = 0, FAIL = 0, failures = [];
 function ok(cond, label, extra) {
@@ -38,6 +38,7 @@ function serve() {
       rep.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream' });
       fs.createReadStream(f).pipe(rep);
     });
+    srv.on('error', function (e) { console.error('static server error:', e.message); process.exit(1); });
     srv.listen(PORT, '127.0.0.1', function () { res(srv); });
   });
 }
@@ -72,6 +73,8 @@ var KEY = function (v) {
 };
 var TYPE = function (s) {
   var S = window.MKJApp.state;
+  /* the app boots on the home screen; tests drive the Calculator app */
+  S.home = false;
   S.expr = s; S.caret = s.length;
   window.MKJApp.press({ act: 'cmd', v: 'equals' });
 };
@@ -210,11 +213,63 @@ async function run() {
   ok(fmtRows.join(' ').indexOf('Number Format') >= 0, 'FORMAT opens number-format options');
   await page.evaluate(KEY, 'ac');
 
+  /* ---------- display settings ---------- */
+  console.log('# display');
+  await page.evaluate(function () {
+    var S = window.MKJApp.state;
+    S.format = 'norm'; S.ioMode = 'math'; S.angle = 'deg';
+    S.expr = '1/8'; S.caret = 3;
+    window.MKJApp.press({ act: 'cmd', v: 'equals' });
+  });
+  await wait(80);
+  eq(await page.evaluate(function () { return document.querySelector('#exprBefore .fx') !== null; }), true,
+     'MathI/O shows 1/8 as a stacked fraction');
+  await page.evaluate(function () { window.MKJApp.state.ioMode = 'line'; window.MKJApp.press({ act: 'cmd', v: 'left' }); });
+  await wait(60);
+  eq(await page.evaluate(function () { return document.querySelector('#exprBefore .fx') === null; }), true,
+     'LineI/O shows the linear form');
+
+  /* number format actually reaches the result line */
+  await page.evaluate(function () { window.MKJApp.state.format = 'fix3'; });
+  await calc('1/3');
+  eq(await page.evaluate(function () { return window.MKJApp.state.result; }), '0.333', 'Fix 3 format applies');
+  await page.evaluate(function () { window.MKJApp.state.format = 'norm'; });
+
+  /* settings persist across a reload */
+  await page.evaluate(function () {
+    var S = window.MKJApp.state;
+    S.angle = 'rad'; S.contrast = 5; S.lang = 'bn'; S.freq = true;
+    window.MKJApp.press({ act: 'cmd', v: 'ac' });
+    window.MKJApp.state.vars.x = 77;
+    window.MKJApp.save();
+  });
+  await page.reload({ waitUntil: 'networkidle0' });
+  await wait(250);
+  var back = await page.evaluate(function () {
+    var S = window.MKJApp.state;
+    return { angle: S.angle, contrast: S.contrast, lang: S.lang, freq: S.freq, x: S.vars.x,
+             attr: document.body.dataset.lang, contrastAttr: document.body.dataset.contrast };
+  });
+  eq(back.angle, 'rad', 'angle survives a reload');
+  eq(back.contrast, 5, 'contrast survives a reload');
+  eq(back.lang, 'bn', 'language survives a reload');
+  eq(back.freq, true, 'frequency setting survives a reload');
+  eq(back.x, 77, 'variable survives a reload');
+  eq(back.attr, 'bn', 'language applied to the document');
+  eq(back.contrastAttr, '5', 'contrast applied to the display');
+  await page.evaluate(function () {
+    var S = window.MKJApp.state;
+    S.angle = 'deg'; S.contrast = 3; S.lang = 'en'; S.freq = false;
+    window.MKJApp.save();
+  });
+  await wait(60);
+
   /* ---------- history ---------- */
   console.log('# history');
   await page.evaluate(function () { window.MKJApp.state.history = []; });
   await calc('2+2');
   await calc('3+3');
+  await wait(120);
   var hist = await page.evaluate(function () { return window.MKJApp.state.history.length; });
   ok(hist >= 2, 'history records results', 'len=' + hist);
   await page.evaluate(function () { window.MKJApp.press({ act: 'cmd', v: 'up' }); });
@@ -319,5 +374,8 @@ async function run() {
 
 run().catch(function (e) {
   console.error('UI test crashed:', e && e.stack || e);
-  process.exitCode = 1;
+  process.exit(1);
+}).then(function () {
+  /* never leave the harness hanging on an open handle */
+  setTimeout(function () { process.exit(process.exitCode || 0); }, 200).unref();
 });
